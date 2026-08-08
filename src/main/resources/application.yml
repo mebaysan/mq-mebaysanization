@@ -6,7 +6,10 @@ mqmanager:
   data-dir: ${MQMANAGER_DATA_DIR:./data}
   # Base64-encoded 32-byte AES key. When unset, a key is generated into <data-dir>/encryption.key.
   encryption-key: ${MQMANAGER_ENCRYPTION_KEY:}
-  # Opt-in only. Message bodies are logged only if this is explicitly turned on.
+  # Permits message bodies to be logged. Enabled, so the log LEVEL is the only remaining guard:
+  # bodies are written only where DEBUG is on for com.baysansoft.mqmanager, which it is not below.
+  # Bodies that are written also appear on the (unauthenticated) Logs page. Set to false to keep them
+  # out regardless of level.
   log-payloads: ${MQMANAGER_LOG_PAYLOADS:true}
 
   browse:
@@ -38,7 +41,7 @@ mqmanager:
     close-timeout: 2s
     # Sent as client.id. A slug, unlike the IBM MQ application tag: Kafka surfaces this in broker
     # logs and metrics, where a space-separated display name reads badly.
-    client-id: mq-manager
+    client-id: mq-mebaysanization
   logs:
     # The in-memory ring buffer behind the monitoring page. stdout remains the real log; this is a
     # bounded copy of the recent tail so the page has something to read without owning a file.
@@ -49,7 +52,7 @@ mqmanager:
 
 spring:
   application:
-    name: mq-manager
+    name: mq-mebaysanization
 
   web:
     resources:

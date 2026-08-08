@@ -14,8 +14,15 @@ public class MqManagerProperties {
     /** Base64 32-byte AES key. Blank means "generate one into the data directory". */
     private String encryptionKey = "";
 
-    /** Opt-in only. Message bodies are never written to the log unless this is true. */
-    private boolean logPayloads = false;
+    /**
+      * Permits message bodies to be written to the log, and so to the in-memory buffer behind the
+      * Logs page. Even when true a body is only written where DEBUG is enabled for this application's
+      * logger, so the level is the second half of the guard.
+      *
+      * <p>False here but {@code true} in {@code application.yml}: this is the value a directly
+      * constructed instance gets, which is what tests use. The shipped default is the yml one.
+      */
+     private boolean logPayloads = false;
 
     private Browse browse = new Browse();
     private Purge purge = new Purge();
@@ -132,7 +139,7 @@ public class MqManagerProperties {
         /** How long a client may block while shutting down before it is abandoned. */
         private Duration closeTimeout = Duration.ofSeconds(2);
         /** Sent as {@code client.id}; the Kafka analogue of IBM MQ's application tag. */
-        private String clientId = "mq-manager";
+        private String clientId = "mq-mebaysanization";
 
         public Duration getApiTimeout() {
             return apiTimeout;

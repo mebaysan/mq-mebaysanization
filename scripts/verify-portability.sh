@@ -29,12 +29,12 @@
 #      NoClassDefFoundError on any topic whose batches use snappy, zstd or lz4, which is the norm in
 #      production Kafka. Cost of keeping them: about 9.5 MB of JAR.
 #
-# Usage:  ./scripts/verify-portability.sh          (builds if target/mq-manager.jar is missing)
+# Usage:  ./scripts/verify-portability.sh          (builds if target/mq-mebaysanization.jar is missing)
 #
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-JAR="target/mq-manager.jar"
+JAR="target/mq-mebaysanization.jar"
 TREE="target/dependency-tree.txt"
 fail=0
 

@@ -130,13 +130,13 @@ jobs:
       - name: Verify portability
         run: ./scripts/verify-portability.sh
 
-      # finalName is fixed at mq-manager so the run command stays `java -jar target/mq-manager.jar`.
+      # finalName is fixed at mq-mebaysanization so the run command stays `java -jar target/mq-mebaysanization.jar`.
       # Stamp the version onto a copy, so an archived or attached JAR says what it is.
       - name: Stamp the version onto a copy of the JAR
         run: |
           set -euo pipefail
-          cp target/mq-manager.jar "target/mq-manager-${{ steps.versions.outputs.release }}.jar"
-          ls -lh target/mq-manager*.jar
+          cp target/mq-mebaysanization.jar "target/mq-mebaysanization-${{ steps.versions.outputs.release }}.jar"
+          ls -lh target/mq-mebaysanization*.jar
 
       - name: Commit the release version and tag it
         run: |
@@ -195,7 +195,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release upload "v${{ steps.versions.outputs.release }}"
-          "target/mq-manager-${{ steps.versions.outputs.release }}.jar"
+          "target/mq-mebaysanization-${{ steps.versions.outputs.release }}.jar"
           --clobber
 
       - name: Summary
@@ -207,7 +207,7 @@ jobs:
             echo "|---|---|"
             echo "| Released | \`${{ steps.versions.outputs.release }}\` |"
             echo "| main now on | \`${{ steps.versions.outputs.next }}\` |"
-            echo "| JAR | \`$(du -h target/mq-manager.jar | cut -f1)\` |"
+            echo "| JAR | \`$(du -h target/mq-mebaysanization.jar | cut -f1)\` |"
             if [ "${{ vars.PUBLISH_JAR }}" = "true" ]; then
               echo "| JAR attached | yes (PUBLISH_JAR is set) |"
             else

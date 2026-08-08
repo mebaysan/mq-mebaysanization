@@ -16,7 +16,7 @@ client installation.
 
 ```bash
 mvn clean package
-java -jar target/mq-manager.jar
+java -jar target/mq-mebaysanization.jar
 # then open http://localhost:8080
 ```
 
@@ -25,8 +25,9 @@ java -jar target/mq-manager.jar
 ## ⚠️ This version has no authentication
 
 There is no login. **Anyone who can reach the port can read, send, delete and purge messages on every
-broker you have configured, using the credentials you stored.** Run it on localhost, or put it behind an
-authenticating reverse proxy. Do not expose it to a network you do not control.
+broker you have configured, using the credentials you stored** — and read this application's own recent
+log lines on the [Logs page](#the-logs-page). Run it on localhost, or put it behind an authenticating
+reverse proxy. Do not expose it to a network you do not control.
 
 This is also why the H2 console is disabled and why the database opens no network listener.
 
@@ -64,7 +65,7 @@ All settings are environment variables with sensible defaults.
 | `MQMANAGER_PORT` | `8080` | HTTP port for both the UI and the API |
 | `MQMANAGER_DATA_DIR` | `./data` | Holds the H2 database and the encryption key |
 | `MQMANAGER_ENCRYPTION_KEY` | *(generated)* | Base64-encoded 32-byte AES key. When unset, one is generated into the data directory on first run |
-| `MQMANAGER_LOG_PAYLOADS` | `true` | Opt-in DEBUG logging of message bodies. On by default. |
+| `MQMANAGER_LOG_PAYLOADS` | `true` | Permits message bodies to be written to the log at DEBUG. **Enabled**, so the only thing keeping bodies out of the log is the log level. Set it to `false` to keep them out whatever the level |
 
 The data directory ends up holding:
 
@@ -356,11 +357,11 @@ docker run -d --name kafka -p 9092:9092 apache/kafka:3.9.1
 ```
 
 Create a connection with bootstrap servers `localhost:9092`, no username, and use topic
-`mq-manager-demo` (create it first with `kafka-topics.sh --create --partitions 3` unless the broker
+`mq-mebaysanization-demo` (create it first with `kafka-topics.sh --create --partitions 3` unless the broker
 auto-creates).
 
 1. Test connection succeeds and reports how many topics are visible.
-2. Send a message with a key and two headers. The returned id is `mq-manager-demo-<partition>-<offset>`.
+2. Send a message with a key and two headers. The returned id is `mq-mebaysanization-demo-<partition>-<offset>`.
 3. Browse: the body is intact, both headers appear under **Properties**, and `KafkaKey`,
    `KafkaPartition`, `KafkaOffset` and `KafkaTimestampType=CreateTime` appear under **Headers**.
 4. **Browse twice, then run `kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list`. It must
@@ -369,7 +370,7 @@ auto-creates).
 5. Depth equals `kafka-run-class.sh kafka.tools.GetOffsetShell --time -1` minus `--time -2`, summed over
    partitions. Send 1,000 more and it goes up by exactly 1,000 — rendered with **no `+`**.
 6. **The per-row Delete button is absent.** Call it directly anyway:
-   `curl -i -X DELETE 'localhost:8080/api/connections/1/queue/messages?queueName=mq-manager-demo&messageId=mq-manager-demo-0-1'`
+   `curl -i -X DELETE 'localhost:8080/api/connections/1/queue/messages?queueName=mq-mebaysanization-demo&messageId=mq-mebaysanization-demo-0-1'`
    → **501** with `"code":"OPERATION_NOT_SUPPORTED"`, and the depth is unchanged.
 7. Purge. The reported count equals the previous depth exactly, depth then reads 0, and
    `kafka-console-consumer.sh --from-beginning` returns nothing.
@@ -425,9 +426,14 @@ The consequences are deliberate, and are stated on the page itself:
 **This is an unauthenticated page, like every other one in this build.** The application never logs a
 credential — passwords are encrypted at rest, Kafka masks the JAAS config, and broker URLs are
 sanitised before they reach a message — but log lines do carry hostnames and queue and topic names,
-and turning on `MQMANAGER_LOG_PAYLOADS` at DEBUG puts message bodies in there too. Note that stack
-traces appear here deliberately, which is the opposite of the rule for API error responses: on a
-monitoring page the stack trace is the point. `max-stack-trace-chars: 0` turns that off.
+and **message bodies are one log level away**. `MQMANAGER_LOG_PAYLOADS` ships enabled, so raising
+`logging.level.com.baysansoft.mqmanager` to `DEBUG` puts every message body you send into the buffer
+and onto this page. At the shipped `INFO` level they are not written; if that is the guarantee you
+want rather than a level you have to remember, set `MQMANAGER_LOG_PAYLOADS=false`.
+
+Note that stack traces appear here deliberately, which is the opposite of the rule for API error
+responses: on a monitoring page the stack trace is the point. `max-stack-trace-chars: 0` turns that
+off.
 
 ---
 

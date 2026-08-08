@@ -65,7 +65,7 @@ class KafkaClientConfigTest {
                             5_000L);
             assertThat(client).containsEntry(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
                     "localhost:9092");
-            assertThat(client).containsEntry(CommonClientConfigs.CLIENT_ID_CONFIG, "mq-manager");
+            assertThat(client).containsEntry(CommonClientConfigs.CLIENT_ID_CONFIG, "mq-mebaysanization");
         }
     }
 

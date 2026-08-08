@@ -18,8 +18,10 @@ import com.baysansoft.mqmanager.logs.LogLevel;
  * <p><strong>This build has no authentication</strong>, so anyone who can reach the port can read these
  * lines. The application never logs a credential — passwords are encrypted at rest, the JAAS config is
  * masked by Kafka, and broker URLs are sanitised before they reach a message — but a log line does
- * carry hostnames, queue and topic names, and, if {@code MQMANAGER_LOG_PAYLOADS} is switched on at
- * DEBUG, message bodies. Set {@code mqmanager.logs.max-stack-trace-chars: 0} to keep stack traces out.
+ * carry hostnames, queue and topic names, and message bodies whenever DEBUG is enabled for this
+ * application's logger — {@code MQMANAGER_LOG_PAYLOADS} ships enabled, so the level is the only thing
+ * keeping them out. Set {@code MQMANAGER_LOG_PAYLOADS=false} to keep bodies out at any level, and
+ * {@code mqmanager.logs.max-stack-trace-chars: 0} to keep stack traces out.
  */
 @RestController
 @RequestMapping("/api/logs")

@@ -380,6 +380,11 @@ export default function ManualPage() {
           restart. Everything is also written to standard output, which is where anything you need to
           keep should be collected from.
         </p>
+        <Warn>
+          That page has no login either, and it is one log level away from showing message bodies:
+          payload logging ships enabled, so running this application at DEBUG puts everything you send
+          onto it. Set <Code>MQMANAGER_LOG_PAYLOADS=false</Code> to keep bodies out whatever the level.
+        </Warn>
       </Section>
 
       <Section id="differences" title="Provider differences at a glance">

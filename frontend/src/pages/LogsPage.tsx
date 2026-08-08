@@ -133,8 +133,10 @@ export default function LogsPage() {
 
       <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
         This build has no login, so anyone who can reach this page can read these lines. Passwords are
-        never logged, but hostnames, queue and topic names appear here — and message bodies will too
-        if <code className="font-mono text-xs">MQMANAGER_LOG_PAYLOADS</code> is switched on.
+        never logged, but hostnames and queue and topic names are — and message bodies are one log
+        level away: <code className="font-mono text-xs">MQMANAGER_LOG_PAYLOADS</code> ships enabled, so
+        raising this application&rsquo;s log level to DEBUG puts every message you send onto this page.
+        Set it to <code className="font-mono text-xs">false</code> to keep bodies out at any level.
       </p>
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">

@@ -12,8 +12,8 @@
     </parent>
 
     <groupId>com.baysansoft</groupId>
-    <artifactId>mq-manager</artifactId>
-    <version>1.0.2-SNAPSHOT</version>
+    <artifactId>mq-mebaysanization</artifactId>
+    <version>1.0.1-SNAPSHOT</version>
     <name>MQ mebaysanization</name>
     <description>Unified web UI for operating message queues on ActiveMQ Classic, Artemis, IBM MQ and Apache Kafka</description>
 
@@ -211,8 +211,8 @@
     </dependencies>
 
     <build>
-        <!-- Produces target/mq-manager.jar so the run command is exactly `java -jar target/mq-manager.jar`. -->
-        <finalName>mq-manager</finalName>
+        <!-- Produces target/mq-mebaysanization.jar so the run command is exactly `java -jar target/mq-mebaysanization.jar`. -->
+        <finalName>mq-mebaysanization</finalName>
 
         <plugins>
             <plugin>
