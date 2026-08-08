@@ -13,7 +13,7 @@
 
     <groupId>com.baysansoft</groupId>
     <artifactId>mq-manager</artifactId>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.1</version>
     <name>MQ mebaysanization</name>
     <description>Unified web UI for operating message queues on ActiveMQ Classic, Artemis, IBM MQ and Apache Kafka</description>
 
