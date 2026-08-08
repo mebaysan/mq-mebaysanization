@@ -1,0 +1,135 @@
+package com.baysansoft.mqmanager;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Guards three mistakes that compile cleanly and only fail later.
+ *
+ * <p>All are cheap to make and expensive to diagnose, which is exactly what a build-time guard is for.
+ */
+class ImportGuardTest {
+
+    /** Resolved from the project root, not the working directory, which varies by runner. */
+    private static Path projectDir() {
+        String basedir = System.getProperty("project.basedir");
+        return basedir != null ? Path.of(basedir) : Path.of("").toAbsolutePath();
+    }
+
+    private static List<Path> filesUnder(Path root, String extension) throws IOException {
+        if (!Files.isDirectory(root)) {
+            return List.of();
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(extension))
+                    .toList();
+        }
+    }
+
+    @Test
+    @DisplayName("neither ActiveMQConnectionFactory is ever imported — the two brokers share the name")
+    void noAmbiguousConnectionFactoryImports() throws IOException {
+        Path sourceRoot = projectDir().resolve("src/main/java");
+        assumeTrue(Files.isDirectory(sourceRoot), "backend sources not present");
+
+        List<String> offenders = new ArrayList<>();
+        for (Path file : filesUnder(sourceRoot, ".java")) {
+            for (String line : Files.readAllLines(file)) {
+                String trimmed = line.strip();
+                if (trimmed.startsWith("import ") && trimmed.contains("ActiveMQConnectionFactory")) {
+                    offenders.add(file.getFileName() + ": " + trimmed);
+                }
+            }
+        }
+
+        assertThat(offenders)
+                .as("""
+                        org.apache.activemq.ActiveMQConnectionFactory (Classic) and \
+                        org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory (Artemis) have \
+                        the same simple name and are both on the classpath. Write the fully-qualified \
+                        name inline instead of importing either.""")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("the frontend never imports react-router-dom, which does not exist in React Router v8")
+    void noReactRouterDomImports() throws IOException {
+        Path frontendSources = projectDir().resolve("frontend/src");
+        assumeTrue(Files.isDirectory(frontendSources), "frontend sources not present");
+
+        List<String> offenders = new ArrayList<>();
+        for (Path file : filesUnder(frontendSources, ".tsx")) {
+            collectReactRouterDom(file, offenders);
+        }
+        for (Path file : filesUnder(frontendSources, ".ts")) {
+            collectReactRouterDom(file, offenders);
+        }
+
+        assertThat(offenders)
+                .as("react-router-dom was removed in React Router v8; import from 'react-router'")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("the two messaging implementations never import each other's client library")
+    void kafkaAndJmsStayBehindTheirOwnSeams() throws IOException {
+        Path sourceRoot = projectDir().resolve("src/main/java");
+        assumeTrue(Files.isDirectory(sourceRoot), "backend sources not present");
+
+        Path kafkaPackage = sourceRoot.resolve("com/baysansoft/mqmanager/kafka");
+        List<String> offenders = new ArrayList<>();
+        for (Path file : filesUnder(sourceRoot, ".java")) {
+            boolean inKafkaPackage = file.startsWith(kafkaPackage);
+            for (String line : Files.readAllLines(file)) {
+                String trimmed = line.strip();
+                if (!trimmed.startsWith("import ")) {
+                    continue;
+                }
+                if (!inKafkaPackage && trimmed.contains("org.apache.kafka")) {
+                    offenders.add(file.getFileName() + ": " + trimmed);
+                }
+                if (inKafkaPackage && trimmed.contains("jakarta.jms")) {
+                    offenders.add(file.getFileName() + ": " + trimmed);
+                }
+                // spring-kafka is deliberately not a dependency; an import of it would compile only
+                // after someone quietly added the artifact, along with its ZooKeeper test baggage.
+                if (trimmed.contains("org.springframework.kafka")) {
+                    offenders.add(file.getFileName() + ": " + trimmed);
+                }
+            }
+        }
+
+        assertThat(offenders)
+                .as("""
+                        Kafka is not JMS and shares no client code with the three JMS providers. \
+                        kafka-clients belongs behind com.baysansoft.mqmanager.kafka, jakarta.jms behind \
+                        com.baysansoft.mqmanager.jms, and spring-kafka is not a dependency of this \
+                        project at all — see the comment on kafka-clients in pom.xml.""")
+                .isEmpty();
+    }
+
+    private static void collectReactRouterDom(Path file, List<String> offenders) throws IOException {
+        for (String line : Files.readAllLines(file)) {
+            String trimmed = line.strip();
+            // Only real module specifiers count. A comment explaining why the package must not be used
+            // is not a violation of the rule it is describing.
+            if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
+                continue;
+            }
+            if (trimmed.contains("'react-router-dom'") || trimmed.contains("\"react-router-dom\"")) {
+                offenders.add(file.getFileName() + ": " + trimmed);
+            }
+        }
+    }
+}

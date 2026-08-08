@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.16</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.baysansoft</groupId>
+    <artifactId>mq-manager</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <name>MQ Manager</name>
+    <description>Unified web UI for operating message queues on ActiveMQ Classic, Artemis, IBM MQ and Apache Kafka</description>
+
+    <properties>
+        <!-- Sets maven.compiler.release=21 via the parent. Never use <source>/<target>. -->
+        <java.version>21</java.version>
+
+        <!--
+          LOAD-BEARING PIN. Spring Boot 3.5.16 manages maven-compiler-plugin 3.14.1, which crashes on
+          JDK 25 with:  Fatal error compiling: java.lang.ExceptionInInitializerError:
+                        com.sun.tools.javac.code.TypeTag :: UNKNOWN
+          3.15.0 bumps plexus-compiler 2.15.0 -> 2.16.2 and fixes it. Required because a developer's
+          default `java` may well be JDK 25 while we target release 21.
+        -->
+        <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
+
+        <!--
+          Retargets Spring Boot's `activemq-bom` import coherently (Boot 3.5.16 manages 6.1.8).
+          ActiveMQ Classic 6.x's main `activemq-client` IS the Jakarta-namespace artifact; the separate
+          `activemq-client-jakarta` artifact is legacy and stops at 6.1.0 — never use it.
+        -->
+        <activemq.version>6.3.0</activemq.version>
+
+        <!--
+          Boot 3.5.16 manages Artemis 2.40.0, whose embedded broker cannot start on JDK 24+: its audit
+          logger calls Subject.getSubject(), which JEP 486 made throw UnsupportedOperationException, and
+          JDK 25 removed the -Djava.security.manager=allow escape hatch entirely.
+          Only 2.4x may be used here. From 2.50.0 the org.apache.activemq coordinates became relocation
+          shells pointing at org.apache.artemis, which would leave artemis-jakarta-client unmanaged.
+        -->
+        <artemis.version>2.44.0</artemis.version>
+
+        <ibm.mq.version>9.4.0.25</ibm.mq.version>
+
+        <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
+        <!-- Node is a BUILD-TIME dependency only; the plugin downloads its own copy into frontend/node.
+             24.x is Active LTS and clears both floors: vite 8 needs >=22.12, react-router 8 needs >=22.22. -->
+        <node.version>v24.19.0</node.version>
+
+        <!-- Flipped by the `skip-frontend` profile for fast backend-only iteration. -->
+        <skip.frontend>false</skip.frontend>
+        <skip.installnodenpm>false</skip.installnodenpm>
+        <skip.npm>false</skip.npm>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- We compile every messaging operation against this one API, for all three providers. -->
+        <dependency>
+            <groupId>jakarta.jms</groupId>
+            <artifactId>jakarta.jms-api</artifactId>
+        </dependency>
+
+        <!-- ===================== Provider clients ===================== -->
+
+        <dependency>
+            <groupId>org.apache.activemq</groupId>
+            <artifactId>activemq-client</artifactId>
+        </dependency>
+
+        <!--
+          MUST be artemis-JAKARTA-client. `artemis-jms-client` is the javax.jms artifact and shares
+          100% of its class names with this one, so using it compiles cleanly and fails only at runtime.
+          Netty's epoll/kqueue natives are linux-x86_64/osx-x86_64 only: they would break the
+          "no platform-specific artifacts" requirement, and Artemis's CheckDependencies catches the
+          resulting NoClassDefFoundError and falls back to NIO.
+        -->
+        <dependency>
+            <groupId>org.apache.activemq</groupId>
+            <artifactId>artemis-jakarta-client</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-native-epoll</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-classes-epoll</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-native-kqueue</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-classes-kqueue</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!--
+          IBM's pure-Java, Jakarta-namespaced client. Client-mode TCP only, no native MQ install.
+          Every class is Java 8 bytecode and the jar carries no native libraries, so it is safe on a
+          bare Java 21 JRE. Keep BouncyCastle (a transitive): MQ's password-protection code needs it.
+        -->
+        <dependency>
+            <groupId>com.ibm.mq</groupId>
+            <artifactId>com.ibm.mq.jakarta.client</artifactId>
+            <version>${ibm.mq.version}</version>
+        </dependency>
+
+        <!--
+          The raw Kafka client, deliberately NOT spring-kafka. Kafka is not JMS: there is no
+          jakarta.jms artifact and no ConnectionFactoryBuilder, and KafkaMessagingOperations drives a
+          KafkaProducer, a KafkaConsumer and an Admin directly. spring-kafka's KafkaTemplate and
+          listener containers solve the long-lived-consumer problem this tool does not have, and
+          spring-kafka-test drags ZooKeeper (with classifier'd Netty epoll natives) plus
+          kafka-streams -> rocksdbjni into the tree, which would fail Gate 2a of
+          scripts/verify-portability.sh. MockProducer and MockConsumer ship inside kafka-clients
+          itself, so the tests need nothing extra.
+
+          Version is Boot 3.5.16's managed kafka.version (3.9.2), left unpinned for BOM coherence.
+          4.x exists, but its clients drop the pre-2.1 broker protocol, nothing here needs anything
+          newer (deleteRecords, record headers and the Duration-taking overloads all long predate
+          3.9), and overriding it would decouple us from the version Boot actually tests against.
+
+          zstd-jni, snappy-java and lz4-java arrive at runtime scope and DO bundle native binaries -
+          48 of them. They are kept on purpose: they are self-extracting and carry every platform, so
+          nothing is required from the host, and excluding them would silently break reading any
+          compressed topic. Gate 2b in scripts/verify-portability.sh checks exactly that distinction.
+        -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+        </dependency>
+
+        <!-- ===================== Test-only embedded brokers ===================== -->
+
+        <dependency>
+            <groupId>org.apache.activemq</groupId>
+            <artifactId>activemq-broker</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- artemis-server declares the classifier'd netty natives in its OWN pom, so the same
+             exclusions must be repeated here or they reappear in `mvn dependency:tree`.
+             activemq-artemis-native (via artemis-journal) genuinely bundles linux .so binaries for the
+             AIO journal; the embedded test broker runs with persistenceEnabled(false) + JournalType.NIO,
+             so it is never loaded. Excluded so the "no native artifacts" gate is literally clean. -->
+        <dependency>
+            <groupId>org.apache.activemq</groupId>
+            <artifactId>artemis-server</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.activemq</groupId>
+                    <artifactId>activemq-artemis-native</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-native-epoll</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-classes-epoll</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-native-kqueue</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-classes-kqueue</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <!-- Produces target/mq-manager.jar so the run command is exactly `java -jar target/mq-manager.jar`. -->
+        <finalName>mq-manager</finalName>
+
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!-- ImportGuardTest scans source files, so it needs the project root rather
+                             than whatever working directory the runner happens to use. -->
+                        <project.basedir>${project.basedir}</project.basedir>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <!--
+              PHASE CHOICE IS DELIBERATE: prepare-package, not generate-resources.
+
+              prepare-package still runs before `package`, so target/classes/static is populated before
+              jar:jar and spring-boot:repackage - the fat JAR is unaffected. But it runs AFTER `test`,
+              so a plain `mvn test` never downloads Node and never touches the network. That is what
+              makes "mvn test passes with nothing installed and no network" literally true.
+
+              Within a single phase Maven runs executions in POM declaration order, which is why
+              frontend-maven-plugin is declared before maven-resources-plugin below.
+            -->
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>${frontend-maven-plugin.version}</version>
+                <configuration>
+                    <workingDirectory>frontend</workingDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm</id>
+                        <goals>
+                            <goal>install-node-and-npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <nodeVersion>${node.version}</nodeVersion>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-ci</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <!-- ci, not install: reproducible, and it hard-fails if the committed
+                                 package-lock.json has drifted from package.json. -->
+                            <arguments>ci</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-build</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>run build</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-frontend-dist</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <skip>${skip.frontend}</skip>
+                            <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                            <overwrite>true</overwrite>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/frontend/dist</directory>
+                                    <!-- LOAD-BEARING. spring-boot-starter-parent configures this plugin
+                                         with '@' as the filter delimiter; filtering a minified bundle
+                                         that contains '@' or '${...}' corrupts it silently at runtime
+                                         rather than failing the build. -->
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- The parent already declares the `repackage` execution in pluginManagement. -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!--
+          Backend-only iteration: `mvn package -Pskip-frontend` produces a JAR with no UI in a few
+          seconds. Note that `mvn spring-boot:run` forks the lifecycle only through test-compile, which
+          is before prepare-package, so it never triggers the npm build either way - use the Vite dev
+          server on :5173 for frontend work.
+        -->
+        <profile>
+            <id>skip-frontend</id>
+            <properties>
+                <skip.frontend>true</skip.frontend>
+                <skip.installnodenpm>true</skip.installnodenpm>
+                <skip.npm>true</skip.npm>
+            </properties>
+        </profile>
+    </profiles>
+
+</project>

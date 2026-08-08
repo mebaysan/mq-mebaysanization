@@ -1,0 +1,71 @@
+# ----------------------------------------------------------------------------------- build output
+target/
+
+# The compiled UI, copied here from frontend/dist during prepare-package. Generated on every build;
+# committing it would let the JAR ship a bundle nobody can trace back to a commit.
+src/main/resources/static/
+
+# ------------------------------------------------------------------------------------- frontend
+# Node itself is a BUILD-TIME dependency that frontend-maven-plugin downloads into frontend/node.
+# Nothing Node-related belongs in the repo or in the JAR.
+frontend/node/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-error.log*
+
+# -------------------------------------------------------------------------------------- secrets
+# The runtime data directory holds the H2 database AND data/encryption.key, the AES key protecting
+# every stored broker password. The named patterns below are belt and braces: this repository is
+# public, and a key committed once stays in the history for good.
+data/
+encryption.key
+*.jks
+*.p12
+*.keystore
+*.pfx
+.env
+.env.*
+
+# ---------------------------------------------------------------------------------------- maven
+# versions-maven-plugin writes this when -DgenerateBackupPoms=false is not passed. The release
+# workflow does pass it, but a local `mvn versions:set` will not.
+pom.xml.versionsBackup
+pom.xml.next
+pom.xml.releaseBackup
+release.properties
+dependency-reduced-pom.xml
+.flattened-pom.xml
+
+# ------------------------------------------------------------------------------------------- jvm
+# Crash dumps land in the working directory and are large, machine-specific and occasionally carry
+# fragments of application memory.
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
+
+# ---------------------------------------------------------------------------------------- editors
+.idea/
+*.iml
+*.ipr
+*.iws
+# Ignore .vscode wholesale, but keep the two files that describe the PROJECT rather than the person:
+# settings.json carries the Java null-analysis config the build expects, and extensions.json is a
+# recommendation, not a preference. Both are worth sharing with a contributor.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ---------------------------------------------------------------------------------- os / scratch
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+*.swp
+*~

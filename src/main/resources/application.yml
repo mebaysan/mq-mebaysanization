@@ -1,0 +1,97 @@
+server:
+  port: ${MQMANAGER_PORT:8080}
+
+mqmanager:
+  # Holds the H2 database file and the generated encryption key. Created on startup if missing.
+  data-dir: ${MQMANAGER_DATA_DIR:./data}
+  # Base64-encoded 32-byte AES key. When unset, a key is generated into <data-dir>/encryption.key.
+  encryption-key: ${MQMANAGER_ENCRYPTION_KEY:}
+  # Opt-in only. Message bodies are never logged unless this is explicitly turned on.
+  log-payloads: ${MQMANAGER_LOG_PAYLOADS:false}
+
+  browse:
+    default-limit: 100
+    max-limit: 1000
+    # Bodies larger than this are truncated in the list; the single-message endpoint returns more.
+    preview-bytes: 4096
+    max-body-bytes: 1048576
+  purge:
+    max-messages: 50000
+    max-duration: 30s
+    first-receive-timeout: 5s
+    receive-timeout: 1s
+  depth:
+    # Depth is a browse-and-count, so it is O(depth) and pulls bodies over the wire. Past this we
+    # report "N+" rather than pretending to know the real number.
+    ceiling: 10000
+  delete:
+    receive-timeout: 5s
+    # Bound on the non-destructive browse used to tell "not there" apart from "cannot be reached".
+    disambiguation-limit: 5000
+  kafka:
+    # Kafka's own defaults run to minutes — max.block.ms alone is 60s, and it is what a producer waits
+    # on for a topic that does not exist. There is no shared connection to bound, so every call carries
+    # one of these instead. This is the only provider with a real wall-clock bound.
+    api-timeout: 5s
+    poll-timeout: 1s
+    browse-timeout: 15s
+    close-timeout: 2s
+    # Sent as client.id, the way "MQ Manager" is sent as IBM MQ's application tag.
+    client-id: mq-manager
+
+spring:
+  application:
+    name: mq-manager
+
+  web:
+    resources:
+      # SpaResourceConfig registers the one and only "/**" resource handler. Boot's own registration
+      # runs first and would be silently replaced by ours (LinkedHashMap, last write wins), which would
+      # also discard the spring.web.resources.cache.* settings without any warning. Turning it off makes
+      # the single registration explicit instead of accidental.
+      add-mappings: false
+
+  datasource:
+    # H2 creates the ./data directory itself, but EncryptionKeyProvider also creates it in its own
+    # constructor, because the key file is written during bean init and must not depend on that.
+    # No AUTO_SERVER: it would open an unauthenticated TCP listener, and v1 has no authentication.
+    url: jdbc:h2:file:${mqmanager.data-dir}/mqmanager;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+  jpa:
+    # Flyway owns the schema. Boot's default for a FILE-mode H2 URL is `none` (it only treats
+    # ":h2:mem" as embedded), so leaving this unset would start the app and then fail on first query.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  h2:
+    # Never enable this. With no authentication in front of it, the console is an arbitrary-SQL
+    # terminal on the same port as the UI, and it can read and overwrite the encrypted password column.
+    console:
+      enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.baysansoft.mqmanager: INFO
+    # These log connection failures at WARN/ERROR with details we translate ourselves; keeping them
+    # quiet avoids duplicate noise and stray credential-bearing URLs in the log.
+    org.apache.activemq: WARN
+    org.apache.activemq.artemis: WARN
+    com.ibm.mq: WARN
+    com.ibm.msg: WARN
+    # Kafka logs its entire resolved configuration at INFO every time a client is constructed, and this
+    # tool constructs one per operation. sasl.jaas.config is typed as a password and comes out masked,
+    # but the volume alone would bury everything else.
+    org.apache.kafka: WARN

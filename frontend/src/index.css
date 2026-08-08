@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* Tailwind v4 CSS-first configuration. Defining --color-brand-* here automatically generates the
+   bg-brand-*, text-brand-*, border-brand-* utilities. There is no tailwind.config.js. */
+@theme {
+  --color-brand-50: oklch(0.97 0.014 254);
+  --color-brand-100: oklch(0.93 0.032 255);
+  --color-brand-200: oklch(0.88 0.059 254);
+  --color-brand-300: oklch(0.81 0.096 252);
+  --color-brand-400: oklch(0.71 0.143 255);
+  --color-brand-500: oklch(0.62 0.19 259);
+  --color-brand-600: oklch(0.55 0.21 262);
+  --color-brand-700: oklch(0.49 0.19 264);
+  --color-brand-800: oklch(0.42 0.16 266);
+  --color-brand-900: oklch(0.38 0.13 266);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
