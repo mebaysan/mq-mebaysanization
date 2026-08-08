@@ -1,4 +1,4 @@
-# MQ Manager
+# MQ mebaysanization
 
 One web UI for operating message queues on **Apache ActiveMQ Classic**, **Apache ActiveMQ Artemis**,
 **IBM MQ** and **Apache Kafka**. Pick a provider, save the connection details, then send messages,
@@ -64,7 +64,7 @@ All settings are environment variables with sensible defaults.
 | `MQMANAGER_PORT` | `8080` | HTTP port for both the UI and the API |
 | `MQMANAGER_DATA_DIR` | `./data` | Holds the H2 database and the encryption key |
 | `MQMANAGER_ENCRYPTION_KEY` | *(generated)* | Base64-encoded 32-byte AES key. When unset, one is generated into the data directory on first run |
-| `MQMANAGER_LOG_PAYLOADS` | `false` | Opt-in DEBUG logging of message bodies. Off by default, and never logged at INFO |
+| `MQMANAGER_LOG_PAYLOADS` | `true` | Opt-in DEBUG logging of message bodies. On by default. |
 
 The data directory ends up holding:
 
@@ -328,7 +328,7 @@ docker run -d -e LICENSE=accept -e MQ_QMGR_NAME=QM1 -e MQ_APP_PASSWORD=passw0rd 
 Create a connection with host `localhost`, port `1414`, queue manager `QM1`, channel `DEV.APP.SVRCONN`,
 user `app`, password `passw0rd`, and use queue `DEV.QUEUE.1`.
 
-1. Test connection succeeds, and `DISPLAY CONN(*) APPLTAG` on the queue manager shows **`MQ Manager`**.
+1. Test connection succeeds, and `DISPLAY CONN(*) APPLTAG` on the queue manager shows **`MQ mebaysanization`**.
 2. Browsing an empty queue returns zero messages and no error.
 3. Put 500 messages; the browse shows bodies, IDs and timestamps, and the depth matches
    `DISPLAY QLOCAL(DEV.QUEUE.1) CURDEPTH`.
@@ -393,6 +393,44 @@ Do one manual pass against an ActiveMQ or Artemis broker with authentication **o
 
 ---
 
+## The Logs page
+
+`/logs` shows this process's own recent log lines — a live view for watching an operation as it
+happens, with a severity filter, a text search over the message and logger, and expandable stack
+traces.
+
+It reads an **in-memory ring buffer**, not a file. The application logs to stdout, and where that ends
+up depends entirely on how it was launched, so a bounded buffer gives the page something to read
+without the application having to own a log file, rotate it, or serve paths off disk. The buffer is
+attached to logback's root logger programmatically rather than through a `logback-spring.xml`, which
+would otherwise replace Boot's whole logging setup for one feature.
+
+The consequences are deliberate, and are stated on the page itself:
+
+- It is **not an audit trail**. The buffer is bounded, and it is gone on restart. Anything permanent
+  should be collected from stdout.
+- Startup **is** captured, including Flyway's migration output. The appender is attached from a
+  `SpringApplication` listener rather than a bean, so it is in place before any bean exists; the
+  oldest line in the buffer is the same one that starts the stdout log. Only the ASCII banner is
+  absent, and that is printed directly to stdout rather than logged.
+- When the buffer has evicted anything, the page says how many lines were dropped rather than implying
+  the history is complete.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `mqmanager.logs.capacity` | `2000` | Lines kept. Well under a megabyte of heap at the default |
+| `mqmanager.logs.max-message-chars` | `4000` | One runaway line cannot dominate the buffer |
+| `mqmanager.logs.max-stack-trace-chars` | `8000` | **Set to `0`** to keep stack traces out of the buffer entirely |
+
+**This is an unauthenticated page, like every other one in this build.** The application never logs a
+credential — passwords are encrypted at rest, Kafka masks the JAAS config, and broker URLs are
+sanitised before they reach a message — but log lines do carry hostnames and queue and topic names,
+and turning on `MQMANAGER_LOG_PAYLOADS` at DEBUG puts message bodies in there too. Note that stack
+traces appear here deliberately, which is the opposite of the rule for API error responses: on a
+monitoring page the stack trace is the point. `max-stack-trace-chars: 0` turns that off.
+
+---
+
 ## API
 
 Queue names are always **query parameters**, never path segments — `DEV.QUEUE.1` is an ordinary MQ queue
@@ -413,6 +451,8 @@ name and a dotted path segment would be treated as a static file request.
 | `DELETE` | `/api/connections/{id}/queue/messages?queueName=&messageId=` |
 | `DELETE` | `/api/connections/{id}/queue/purge?queueName=` |
 | `GET` | `/api/connections/{id}/queue/depth?queueName=` |
+| `GET` | `/api/logs?level=&q=&limit=` |
+| `DELETE` | `/api/logs` *(empties the in-memory buffer; stdout is untouched)* |
 
 On `PUT`, omitting `password` keeps the stored one and sending `""` clears it — the current value is
 never sent to the client, so an unchanged edit form has nothing to resubmit.
@@ -468,7 +508,7 @@ deleting topics.
 
 ## Troubleshooting
 
-**"Database may be already in use"** — another MQ Manager is running against the same data directory.
+**"Database may be already in use"** — another MQ mebaysanization is running against the same data directory.
 
 **"The stored password cannot be decrypted"** — `encryption.key` was lost, replaced, or
 `MQMANAGER_ENCRYPTION_KEY` changed. Edit the affected connection and re-enter the password.

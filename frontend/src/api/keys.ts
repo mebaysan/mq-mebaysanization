@@ -12,4 +12,8 @@ export const queryKeys = {
     ['connections', id, 'queue', queueName, 'depth'] as const,
   message: (id: number, queueName: string, messageId: string) =>
     ['connections', id, 'queue', queueName, 'message', messageId] as const,
+  /** Prefix, so clearing the buffer invalidates every filter combination at once. */
+  logsRoot: () => ['logs'] as const,
+  logs: (level: string, query: string, limit: number) =>
+    ['logs', level, query, limit] as const,
 }

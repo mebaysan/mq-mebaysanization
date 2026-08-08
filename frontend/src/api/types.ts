@@ -90,6 +90,30 @@ export interface SendMessageResult {
   messageId: string
 }
 
+export type LogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
+
+export interface LogEntry {
+  /** Monotonic per-process counter. Stable identity for a row, even as the buffer rolls. */
+  sequence: number
+  timestamp: string
+  level: LogLevel
+  logger: string
+  thread: string
+  message: string
+  /** Present only when the line carried an exception. */
+  stackTrace: string | null
+}
+
+/** A read of the in-memory ring buffer behind the monitoring page. */
+export interface LogSnapshot {
+  entries: LogEntry[]
+  /** Lines currently in the buffer, matched or not. */
+  held: number
+  capacity: number
+  /** Lines evicted since startup. Non-zero means the history shown is incomplete. */
+  dropped: number
+}
+
 /** The single error shape every endpoint uses. */
 export interface ApiErrorBody {
   status: number

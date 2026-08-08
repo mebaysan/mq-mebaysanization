@@ -31,7 +31,7 @@ public class IbmMqConnectionFactoryBuilder implements ConnectionFactoryBuilder {
     public static final String DEFAULT_CHANNEL = "SYSTEM.DEF.SVRCONN";
 
     /** Shows up in {@code DISPLAY CONN(*) APPLTAG} on the queue manager. Max 28 characters. */
-    static final String APPLICATION_NAME = "MQ Manager";
+    static final String APPLICATION_NAME = "MQ mebaysanization";
 
     @Override
     public Provider provider() {

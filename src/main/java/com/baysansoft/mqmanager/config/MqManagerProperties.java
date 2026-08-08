@@ -22,6 +22,7 @@ public class MqManagerProperties {
     private Depth depth = new Depth();
     private Delete delete = new Delete();
     private Kafka kafka = new Kafka();
+    private Logs logs = new Logs();
 
     public static class Browse {
         private int defaultLimit = 100;
@@ -174,6 +175,44 @@ public class MqManagerProperties {
         }
     }
 
+    /**
+     * The in-memory log ring buffer behind the monitoring page. Bounded on every axis, because this
+     * lives in the heap of the process it is reporting on: a runaway logger must not be able to turn
+     * a diagnostic aid into the outage.
+     */
+    public static class Logs {
+        /** Lines kept. At the default this is well under a megabyte of heap. */
+        private int capacity = 2_000;
+        /** A single very long line is truncated rather than allowed to dominate the buffer. */
+        private int maxMessageChars = 4_000;
+        /** Set to 0 to keep stack traces out of the buffer, and so off the unauthenticated page. */
+        private int maxStackTraceChars = 8_000;
+
+        public int getCapacity() {
+            return capacity;
+        }
+
+        public void setCapacity(int capacity) {
+            this.capacity = capacity;
+        }
+
+        public int getMaxMessageChars() {
+            return maxMessageChars;
+        }
+
+        public void setMaxMessageChars(int maxMessageChars) {
+            this.maxMessageChars = maxMessageChars;
+        }
+
+        public int getMaxStackTraceChars() {
+            return maxStackTraceChars;
+        }
+
+        public void setMaxStackTraceChars(int maxStackTraceChars) {
+            this.maxStackTraceChars = maxStackTraceChars;
+        }
+    }
+
     public static class Delete {
         private Duration receiveTimeout = Duration.ofSeconds(5);
         /** Bounds the browse that distinguishes "not on the queue" from "cannot be reached". */
@@ -226,6 +265,14 @@ public class MqManagerProperties {
 
     public void setKafka(Kafka kafka) {
         this.kafka = kafka;
+    }
+
+    public Logs getLogs() {
+        return logs;
+    }
+
+    public void setLogs(Logs logs) {
+        this.logs = logs;
     }
 
     public Browse getBrowse() {

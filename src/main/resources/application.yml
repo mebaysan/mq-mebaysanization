@@ -6,8 +6,8 @@ mqmanager:
   data-dir: ${MQMANAGER_DATA_DIR:./data}
   # Base64-encoded 32-byte AES key. When unset, a key is generated into <data-dir>/encryption.key.
   encryption-key: ${MQMANAGER_ENCRYPTION_KEY:}
-  # Opt-in only. Message bodies are never logged unless this is explicitly turned on.
-  log-payloads: ${MQMANAGER_LOG_PAYLOADS:false}
+  # Opt-in only. Message bodies are logged only if this is explicitly turned on.
+  log-payloads: ${MQMANAGER_LOG_PAYLOADS:true}
 
   browse:
     default-limit: 100
@@ -36,8 +36,16 @@ mqmanager:
     poll-timeout: 1s
     browse-timeout: 15s
     close-timeout: 2s
-    # Sent as client.id, the way "MQ Manager" is sent as IBM MQ's application tag.
+    # Sent as client.id. A slug, unlike the IBM MQ application tag: Kafka surfaces this in broker
+    # logs and metrics, where a space-separated display name reads badly.
     client-id: mq-manager
+  logs:
+    # The in-memory ring buffer behind the monitoring page. stdout remains the real log; this is a
+    # bounded copy of the recent tail so the page has something to read without owning a file.
+    capacity: 2000
+    max-message-chars: 4000
+    # Set to 0 to keep stack traces out of the buffer, and therefore off the unauthenticated page.
+    max-stack-trace-chars: 8000
 
 spring:
   application:

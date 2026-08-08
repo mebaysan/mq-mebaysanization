@@ -6,6 +6,10 @@ import org.springframework.boot.autoconfigure.jms.JmsAutoConfiguration;
 import org.springframework.boot.autoconfigure.jms.activemq.ActiveMQAutoConfiguration;
 import org.springframework.boot.autoconfigure.jms.artemis.ArtemisAutoConfiguration;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.context.annotation.Bean;
+
+import com.baysansoft.mqmanager.logs.LogBuffer;
+import com.baysansoft.mqmanager.logs.LogBufferInstaller;
 
 /**
  * Spring Boot's JMS auto-configuration is excluded deliberately.
@@ -26,7 +30,25 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 @ConfigurationPropertiesScan
 public class MqManagerApplication {
 
+    /**
+     * Static because it has to exist before the context does.
+     *
+     * <p>The monitoring page reads an in-memory buffer fed by a logback appender, and an appender
+     * attached by an ordinary bean starts capturing too late — Flyway has already migrated by then, so
+     * the one thing someone opens the page to see after a deploy is the one thing missing from it.
+     * Registering it as a {@code SpringApplication} listener attaches it before any bean exists.
+     */
+    private static final LogBufferInstaller LOG_CAPTURE = new LogBufferInstaller();
+
     public static void main(String[] args) {
-        SpringApplication.run(MqManagerApplication.class, args);
+        SpringApplication application = new SpringApplication(MqManagerApplication.class);
+        application.addListeners(LOG_CAPTURE);
+        application.run(args);
+    }
+
+    /** Hands the already-populated buffer to the context, rather than building a second, empty one. */
+    @Bean
+    LogBuffer logBuffer() {
+        return LOG_CAPTURE.buffer();
     }
 }

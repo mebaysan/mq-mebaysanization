@@ -148,7 +148,7 @@ jobs:
           git add pom.xml
           git commit -m "chore(release): ${{ steps.versions.outputs.release }} [skip ci]"
           git tag -a "v${{ steps.versions.outputs.release }}" \
-                  -m "MQ Manager ${{ steps.versions.outputs.release }}"
+                  -m "MQ mebaysanization ${{ steps.versions.outputs.release }}"
 
       - name: Prepare the next development version
         run: |
@@ -173,7 +173,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create "v${{ steps.versions.outputs.release }}"
-          --title "MQ Manager ${{ steps.versions.outputs.release }}"
+          --title "MQ mebaysanization ${{ steps.versions.outputs.release }}"
           --generate-notes
           --verify-tag
 

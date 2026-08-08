@@ -111,4 +111,14 @@ class IbmMqConnectionFactoryBuilderTest {
 
         assertThatCode(() -> builder.tuneDestination(notAnMqDestination)).doesNotThrowAnyException();
     }
+
+    @Test
+    @DisplayName("the application name fits IBM MQ's 28-character APPLTAG, which truncates silently")
+    void applicationNameFitsTheApplTagLimit() {
+        // MQCSP/APPLTAG is capped at 28 characters and the queue manager simply cuts anything longer,
+        // so a rename that overflows would show up only as a puzzling half-name in DISPLAY CONN(*).
+        assertThat(IbmMqConnectionFactoryBuilder.APPLICATION_NAME)
+                .isNotBlank()
+                .hasSizeLessThanOrEqualTo(28);
+    }
 }
