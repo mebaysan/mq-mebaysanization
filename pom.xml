@@ -16,6 +16,46 @@
     <version>1.1.1</version>
     <name>MQ mebaysanization</name>
     <description>Unified web UI for operating message queues on ActiveMQ Classic, Artemis, IBM MQ and Apache Kafka</description>
+    <url>https://github.com/mebaysan/mq-mebaysanization</url>
+
+    <!--
+      Apache-2.0 rather than MIT, deliberately. The compile tree is overwhelmingly Apache-2.0 already;
+      section 4 gives the NOTICE mechanism a 92-jar fat JAR actually needs; section 3 grants patents;
+      and section 6 disclaims trademark rights next to a project that names IBM MQ and three Apache
+      products on every page. This licence covers THIS project's source only - it grants nothing in the
+      bundled IBM MQ client, which stays under IBM's own terms. See NOTICE and README.md.
+    -->
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <organization>
+        <name>BaysanSoft</name>
+        <url>https://mebaysan.com</url>
+    </organization>
+
+    <developers>
+        <developer>
+            <id>mebaysan</id>
+            <url>https://mebaysan.com</url>
+            <organization>BaysanSoft</organization>
+        </developer>
+    </developers>
+
+    <scm>
+        <url>https://github.com/mebaysan/mq-mebaysanization</url>
+        <connection>scm:git:https://github.com/mebaysan/mq-mebaysanization.git</connection>
+        <developerConnection>scm:git:git@github.com:mebaysan/mq-mebaysanization.git</developerConnection>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/mebaysan/mq-mebaysanization/issues</url>
+    </issueManagement>
 
     <properties>
         <!-- Sets maven.compiler.release=21 via the parent. Never use <source>/<target>. -->
@@ -313,6 +353,34 @@
                                          with '@' as the filter delimiter; filtering a minified bundle
                                          that contains '@' or '${...}' corrupts it silently at runtime
                                          rather than failing the build. -->
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+
+                    <!--
+                      Apache-2.0 section 4(a) and 4(d): anyone who passes the JAR on must hand over the
+                      licence and the NOTICE with it. Putting both under META-INF/ means they travel with
+                      the artifact automatically instead of depending on someone remembering to attach
+                      them. Not skipped by -Pskip-frontend - the licence is not a frontend concern.
+                    -->
+                    <execution>
+                        <id>copy-license</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/META-INF</outputDirectory>
+                            <overwrite>true</overwrite>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}</directory>
+                                    <includes>
+                                        <include>LICENSE</include>
+                                        <include>NOTICE</include>
+                                    </includes>
                                     <filtering>false</filtering>
                                 </resource>
                             </resources>

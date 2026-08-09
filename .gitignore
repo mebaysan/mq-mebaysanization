@@ -23,10 +23,20 @@ yarn-error.log*
 # public, and a key committed once stays in the history for good.
 data/
 encryption.key
+# The H2 files by name as well as by directory. MQMANAGER_DATA_DIR is documented and can point the
+# database anywhere, including somewhere the `data/` rule above does not cover - the key already had
+# a location-independent rule and the database it protects deserves the same.
+*.mv.db
+*.trace.db
+*.lock.db
 *.jks
 *.p12
 *.keystore
 *.pfx
+# Spring's conventional local-override files, which is where a broker host and password would land if
+# anyone kept one.
+application-local.yml
+application-local.properties
 .env
 .env.*
 

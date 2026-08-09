@@ -1,0 +1,56 @@
+MQ mebaysanization
+Copyright 2026 BaysanSoft
+
+This product includes software developed by BaysanSoft (https://github.com/mebaysan/mq-mebaysanization),
+licensed under the Apache License, Version 2.0.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+The source in this repository contains no third-party code. The fat JAR produced
+by `mvn clean package` bundles the dependencies declared in pom.xml, each under
+its own licence. The notable ones:
+
+  Apache-2.0
+    Spring Boot and Spring Framework       https://spring.io
+    Apache Tomcat (embedded)               https://tomcat.apache.org
+    Apache ActiveMQ Classic client         https://activemq.apache.org
+    Apache ActiveMQ Artemis Jakarta client https://activemq.apache.org/components/artemis/
+    Apache Kafka clients                   https://kafka.apache.org
+    Flyway Community Edition               https://flywaydb.org
+    Jackson                                https://github.com/FasterXML/jackson
+    Netty                                  https://netty.io
+
+  MPL-2.0 / EPL-1.0 (dual)
+    H2 Database Engine                     https://h2database.com
+
+  LGPL-2.1-or-later
+    Hibernate ORM                          https://hibernate.org
+
+  EPL-2.0 / GPL-2.0-with-Classpath-Exception
+    Jakarta EE APIs, including jakarta.jms-api
+    (the Classpath Exception is what permits linking without copyleft reach)
+
+  EPL-1.0 / LGPL-2.1 (dual)
+    Logback                                https://logback.qos.ch
+
+  MIT-style
+    Bouncy Castle                          https://bouncycastle.org
+
+  Public Domain
+    org.json                               https://github.com/stleary/JSON-java
+
+  IBM International Program License Agreement — NOT an open-source licence
+    com.ibm.mq:com.ibm.mq.jakarta.client
+    Licence Information form L-RZND-SLUBFC
+    https://www14.software.ibm.com/cgi-bin/weblap/lap.pl?li_formnum=L-RZND-SLUBFC
+
+The IBM MQ client is proprietary. Building this project produces a JAR containing
+IBM restricted materials; redistributing that JAR is a decision the builder makes
+under IBM's terms, not under this project's Apache-2.0 licence. See the
+"Third-party notices" section of README.md.
+
+The frontend dependency tree (frontend/package-lock.json) is entirely permissive:
+MIT, ISC, Apache-2.0 and BSD-3-Clause, plus MPL-2.0 build-time-only native
+binaries that do not reach the compiled output.

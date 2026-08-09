@@ -1,0 +1,90 @@
+# Pull-request gate.
+#
+# This exists because release.yml runs on push to main only, which on a public repository means a
+# contributor's patch would first be compiled and executed by the job that holds the write-scoped
+# token - and a failure there aborts a release of code that has already landed. This workflow moves
+# that verification in front of the merge.
+#
+# Read-only by design. `pull_request` (not `pull_request_target`) checks out the PR head, so for a
+# fork the code below is untrusted: it gets no secrets and a read-only token. Do not add
+# `pull_request_target` here, and do not add write permissions - that combination is the classic
+# "pwn request" and it would hand this repository's token to anyone who opens a PR.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+      - 'NOTICE'
+  # Also on direct pushes to non-main branches, so work in progress gets the same signal before a PR
+  # exists. main itself is covered by release.yml, which runs the identical gate.
+  push:
+    branches-ignore: [main]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+      - 'NOTICE'
+
+# A superseded run on the same branch is worth cancelling: unlike a release, nothing here has side
+# effects, so the only cost of stopping early is CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build, test and prove portability
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the PR head
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      # Same key shape as release.yml, so the two workflows share the entry rather than each
+      # populating their own. See that file for why node_modules is deliberately not cached.
+      - name: Cache the Node download and the npm cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node
+            ~/.npm
+          key: node-${{ runner.os }}-${{ hashFiles('pom.xml', 'frontend/package-lock.json') }}
+          restore-keys: node-${{ runner.os }}-
+
+      # The whole gate in one command: backend tests (including ImportGuardTest and the Flyway schema
+      # validation in MqManagerApplicationTests), then `tsc --noEmit` and the Vite build via
+      # frontend-maven-plugin, then the fat JAR. No broker, no Docker, no network beyond the registries.
+      - name: Build and test
+        run: mvn -B -ntp clean package
+
+      # Proves the JAR needs nothing from the host: jakarta.jms-api must be 3.x, no platform-classifier
+      # artifacts, no bundled native binaries outside the allowlist. Must run after package.
+      - name: Verify portability
+        run: ./scripts/verify-portability.sh
+
+      # A release would fail at the version check rather than at the build, which is a slow and
+      # confusing way to find out. Catch it here instead.
+      - name: Reject -SNAPSHOT and malformed versions
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import xml.etree.ElementTree as ET; ns={'m':'http://maven.apache.org/POM/4.0.0'}; print(ET.parse('pom.xml').getroot().find('m:version', ns).text.strip())")
+          echo "pom version: $version"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::pom version '$version' is not x.y.z. This project ships no -SNAPSHOT versions."
+            exit 1
+          fi

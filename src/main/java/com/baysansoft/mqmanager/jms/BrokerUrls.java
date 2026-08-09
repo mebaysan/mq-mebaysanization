@@ -54,12 +54,32 @@ public final class BrokerUrls {
         return "%s:%s".formatted(profile.getHost(), profile.getPort());
     }
 
-    /** Strips any {@code user:password@} segment from a URL a user may have pasted in. */
+    /**
+     * Masks any {@code user:password@} segment in a URL a user may have pasted in.
+     *
+     * <p>LOAD-BEARING GREED. The password group is {@code [^/]*}, not {@code [^/@]*}, so it runs to the
+     * <em>last</em> {@code @} in the authority. A password containing {@code @} is one users really do
+     * paste and brokers really do accept; against the narrower class the match anchored on the
+     * <em>first</em> {@code @} and left the tail of the password in the clear — in 502 bodies and, worse,
+     * on the unauthenticated Logs page, for any <em>saved</em> profile. Excluding {@code /} is what stops
+     * the group running past a path separator into the next nested URL, which is what keeps composite
+     * forms such as {@code failover://(tcp://a:61616,tcp://b:61616)} intact. The username group excludes
+     * {@code :} rather than {@code @} so a username like {@code user@domain} is still recognised.
+     *
+     * <p>The backstop matters more than the pattern. A password containing {@code /} cannot be told
+     * apart from a path, so rather than guess, anything still carrying an {@code @} the mask did not put
+     * there is withheld wholesale. A caller that loses a hostname from one error message has lost
+     * nothing that matters; a caller that leaks a credential cannot take it back.
+     */
     public static String sanitize(String url) {
         if (url == null) {
             return null;
         }
-        return url.replaceAll("://[^/@]*:[^/@]*@", "://****:****@");
+        String masked = url.replaceAll("://[^/:]*:[^/]*@", "://****:****@");
+        if (masked.replace("****:****@", "").indexOf('@') >= 0) {
+            return "(broker URL withheld: it carries credentials this code cannot safely mask)";
+        }
+        return masked;
     }
 
     private static int port(ConnectionProfile profile, int fallback) {

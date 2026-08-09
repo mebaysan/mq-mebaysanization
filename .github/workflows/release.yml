@@ -186,26 +186,23 @@ jobs:
           --generate-notes
           --verify-tag
 
-      # DELIBERATELY OFF, and this is a licensing decision rather than a technical one.
+      # THE JAR IS NEVER ATTACHED TO A RELEASE, and this is a licensing decision rather than a
+      # technical one. There used to be a `vars.PUBLISH_JAR` switch here; it was removed when this
+      # repository went public, because a switch defended only by a YAML comment is one settings
+      # click away from an irreversible mistake that the GitHub UI never explains.
       #
-      # The fat JAR bundles com.ibm.mq.jakarta.client, which ships under the IBM International Program
-      # License Agreement, not an open-source licence. On a PUBLIC repository a release asset is
-      # downloadable by anyone, so attaching this JAR redistributes IBM's client to the world - the
-      # exact thing the "Licensing note" section of README.md warns about. Note that an Actions
+      # The fat JAR nests com.ibm.mq.jakarta.client byte-for-byte - about 18.4 MiB of IBM restricted
+      # materials under BOOT-INF/lib/ - and that ships under the IBM International Program License
+      # Agreement, not an open-source licence. On a public repository a release asset is downloadable
+      # by anyone, so attaching the JAR would redistribute IBM's client to the world. An Actions
       # artifact is no safer: on a public repo those are world-readable too.
       #
-      # Anyone can still build it themselves; README.md documents `mvn clean package`.
+      # Anyone can still build it themselves; README.md documents `mvn clean package`, and the
+      # "Third-party notices" section tells them what they are then holding.
       #
-      # To turn this on, set the repository variable PUBLISH_JAR to `true`
-      # (Settings -> Secrets and variables -> Actions -> Variables). Read the licensing note first.
-      - name: Attach the JAR to the release
-        if: vars.PUBLISH_JAR == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release upload "v${{ steps.versions.outputs.release }}"
-          "target/mq-mebaysanization-${{ steps.versions.outputs.release }}.jar"
-          --clobber
+      # If IBM's LI form L-RZND-SLUBFC is ever confirmed to permit redistribution of this artifact,
+      # restore the step deliberately and record the finding in the repository - do not re-add a
+      # switch.
 
       - name: Summary
         run: |
@@ -217,9 +214,5 @@ jobs:
             echo "| Released | \`${{ steps.versions.outputs.release }}\` |"
             echo "| main now on | \`${{ steps.versions.outputs.next }}\` |"
             echo "| JAR | \`$(du -h "target/mq-mebaysanization-${{ steps.versions.outputs.release }}.jar" | cut -f1)\` |"
-            if [ "${{ vars.PUBLISH_JAR }}" = "true" ]; then
-              echo "| JAR attached | yes (PUBLISH_JAR is set) |"
-            else
-              echo "| JAR attached | no — see the licensing note in \`release.yml\` |"
-            fi
+            echo "| JAR attached | never — it bundles the IBM MQ client; build it yourself |"
           } >> "$GITHUB_STEP_SUMMARY"

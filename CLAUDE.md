@@ -142,6 +142,26 @@ rejects a `-SNAPSHOT`, a non-`x.y.z` version, or a version whose tag already exi
 `pom.xml` has **no `<finalName>`** — Maven's default gives `mq-mebaysanization-<version>.jar`, and
 `verify-portability.sh` resolves it by glob.
 
+## Licensing
+
+This repository is **public and Apache-2.0** (`LICENSE`, `NOTICE`, `<licenses>` in `pom.xml`). Two
+consequences that are easy to get wrong:
+
+- **Never attach the JAR to a release, and never upload it as an Actions artifact.** The fat JAR nests
+  `com.ibm.mq.jakarta.client` byte-for-byte — ~18.4 MiB of IBM restricted materials under
+  `BOOT-INF/lib/` — under the IBM International Program License Agreement, which is not an
+  open-source licence. On a public repo both release assets and Actions artifacts are world-readable,
+  so either one redistributes IBM's client to the world. `release.yml` used to gate this behind a
+  `PUBLISH_JAR` variable; that switch was deliberately deleted rather than left set to false. Do not
+  reintroduce it. Users build their own JAR — that is what `mvn clean package` in `README.md` is for.
+- **The project's own licence and IBM's are separate questions.** Apache-2.0 covers this source and
+  grants nothing in any bundled dependency. `README.md` keeps them in two sections (`## License`,
+  `## Third-party notices`) for exactly that reason; do not merge them back together.
+
+`maven-resources-plugin` copies `LICENSE` and `NOTICE` into `META-INF/` at `prepare-package` so they
+travel with the JAR (Apache-2.0 §4(a) and §4(d)). A new bundled dependency means a new entry in
+`NOTICE`.
+
 ## Comments
 
 Comments here explain *why*, especially where a decision looks wrong or a simpler alternative was

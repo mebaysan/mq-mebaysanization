@@ -21,8 +21,8 @@ java -jar target/mq-mebaysanization-*.jar
 # then open http://localhost:8080
 ```
 
-The JAR carries its version in the filename — `mq-mebaysanization-1.0.3.jar` — so an archived or
-downloaded copy says what it is without anyone having to rename it.
+The JAR carries its version in the filename — `mq-mebaysanization-<version>.jar` — so an archived or
+copied JAR says what it is without anyone having to rename it.
 
 ---
 
@@ -87,8 +87,16 @@ data/encryption.key     the AES key protecting stored broker passwords (mode 060
 ### Encryption and key management
 
 Broker passwords are encrypted with AES-256-GCM before being written to the database, using a fresh
-random IV per value. A password is **never** returned by any endpoint — the response type has no field
-for one at all — and never appears in a log line.
+random IV per value. The **password field** is never returned by any endpoint — the response type has no
+field for one at all — and never appears in a log line.
+
+**That guarantee covers the password field and nothing else.** The broker URL override is stored and
+returned in the clear, because the edit form has to round-trip it. If you paste
+`tcp://user:secret@host:61616` into it, that password sits unencrypted in the database and comes back
+from `GET /api/connections` — which, in a build with no authentication, means anyone who can reach the
+port. Put credentials in the username and password fields, which are encrypted, and keep the override
+for what it is for: expressing a URL shape the plain fields cannot. See
+[Connecting to each provider](#connecting-to-each-provider).
 
 **Back up `data/encryption.key`.** Without it the stored passwords cannot be decrypted. If the key is
 lost or rotated, the application still starts and still lists every connection; only the operations that
@@ -120,6 +128,12 @@ not apply, so this only bites someone calling the API directly.
 **Broker URL override** is used verbatim in place of `tcp://host:port`, with nothing appended. That is
 the point of it: it is how you express something the plain fields cannot, such as
 `failover://(tcp://a:61616,tcp://b:61616)?maxReconnectAttempts=1`.
+
+> **Do not put credentials in it.** Unlike the password field, this one is **not encrypted** — the edit
+> form has to round-trip it, so it is stored as typed and returned as typed by `GET /api/connections`,
+> which no login stands in front of. A `user:password@` you paste here is masked in logs and error
+> messages, but it is readable in the API response and in the H2 file. Use the username and password
+> fields instead.
 
 IBM MQ connects in **client mode over TCP** only. Bindings mode is never used and is not exposed —
 it requires a native MQ server installation and would break the "just a JRE" promise.
@@ -307,9 +321,13 @@ older Node will probably work, but it is not what the build uses.
 
 ### Versioning and releases
 
-**There are no `-SNAPSHOT` versions here.** `main` always holds a real version, so the JAR you build
-locally is named exactly like the one on the release page — `mq-mebaysanization-1.0.3.jar`, never
+**There are no `-SNAPSHOT` versions here.** `main` always holds a real version, so a JAR built from any
+commit is named for the release it corresponds to — `mq-mebaysanization-1.0.3.jar`, never
 `…-1.0.3-SNAPSHOT.jar`. That is the entire reason for the scheme.
+
+Releases carry **no JAR asset** — only a tag and generated notes — because the JAR bundles the IBM MQ
+client. Build your own with `mvn clean package`, and read [Third-party notices](#third-party-notices)
+before passing it on.
 
 Every push to `main` that touches something other than documentation cuts a release of **whatever the
 pom currently says**, in one commit:
@@ -634,12 +652,49 @@ Kafka adds a few codes of its own, all in the same shape:
 
 ---
 
-## Licensing note
+## License
 
-The IBM MQ client is distributed under the **IBM International Program License Agreement**, not an
-open-source licence. Redistributing this fat JAR outside your own organisation carries obligations that
-the Apache-licensed ActiveMQ and Artemis clients do not. The IBM MQ stack is also about 19 MB of the
-JAR's size.
+This project is licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE). You may use,
+modify and redistribute it, including commercially, provided you keep the licence and the
+[`NOTICE`](NOTICE) file with it and state what you changed.
+
+That covers *this project's own source*. It grants you nothing in the third-party libraries the build
+pulls in, and in particular nothing in the IBM MQ client — see the next section, which is a separate
+question with a separate answer.
+
+*IBM* and *IBM MQ* are trademarks of International Business Machines Corporation. *Apache*,
+*ActiveMQ*, *Artemis* and *Kafka* are trademarks of the Apache Software Foundation. This project is
+not affiliated with, endorsed by, or sponsored by either.
+
+---
+
+## Third-party notices
+
+[`NOTICE`](NOTICE) lists what the fat JAR bundles and under which licence. Both files are copied into
+`META-INF/` at package time, so they travel with the JAR rather than depending on anyone remembering
+to attach them. The frontend tree is entirely permissive (MIT, ISC, Apache-2.0, BSD-3-Clause). One
+backend dependency is weak copyleft — Hibernate ORM, LGPL-2.1-or-later — and the `jakarta.*` APIs are
+EPL-2.0 / GPL-2.0 **with the Classpath Exception**, which is what permits linking without copyleft
+reaching your code.
+
+**The IBM MQ client is the exception, and it is not open source.**
+`com.ibm.mq:com.ibm.mq.jakarta.client` ships under the **IBM International Program License Agreement**,
+Licence Information form
+[`L-RZND-SLUBFC`](https://www14.software.ibm.com/cgi-bin/weblap/lap.pl?li_formnum=L-RZND-SLUBFC). Its
+POM header reads `THIS PRODUCT CONTAINS RESTRICTED MATERIALS OF IBM`.
+
+Declaring the Maven coordinate is ordinary and fine: IBM publishes the artifact to Maven Central so
+applications can resolve it, and your build fetches it from IBM's own distribution channel. No IBM code
+lives in this repository — `IbmMqConnectionFactoryBuilder` and `IbmMqDestinationLister` only call the
+API.
+
+**Redistributing the built JAR is a different act, and it is yours to decide.** There is no
+`maven-shade-plugin` here, so `spring-boot-maven-plugin`'s `repackage` nests each dependency
+byte-for-byte: `com.ibm.mq.jakarta.client`, the three BouncyCastle jars and `json` it drags in sit
+unmodified under `BOOT-INF/lib/` — about **18.4 MiB of IBM restricted materials in every JAR you
+build**. Handing that JAR to anyone outside your own organisation is redistribution under IBM's terms,
+not under this project's Apache-2.0 licence. Read the LI form before you do. This is why releases here
+carry no JAR asset and why `mvn clean package` is the documented way to get one.
 
 ---
 
