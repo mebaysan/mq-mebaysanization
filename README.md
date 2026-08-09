@@ -37,6 +37,60 @@ This is also why the H2 console is disabled and why the database opens no networ
 
 ---
 
+## The app
+
+Four screens, one REST API behind them, and the same behaviour whichever broker is configured. The
+shots below are the real UI against a live ActiveMQ Classic broker — nothing is mocked up.
+
+**Queue explorer.** The screen you will spend your time on: read the depth, browse what is queued,
+inspect or delete one message, purge, and send — with the destinations you have opened remembered as
+chips under the name box. Note the depth: **`5+`, not `5`**. ActiveMQ Classic caps what a browser may
+see, so the honest answer is a floor and the UI says which limit produced it. Reading a number here
+never means more than the broker actually promised.
+
+![Queue explorer: depth, browsed messages and the send panel](docs/screenshots/queue-explorer.png)
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Connections.** Saved brokers across all four providers. Passwords are encrypted on disk and the
+response type has no field to return one in.
+
+<img alt="Connections list showing ActiveMQ Classic, Artemis, IBM MQ and Kafka profiles" src="docs/screenshots/connections.png">
+
+</td>
+<td width="50%" valign="top">
+
+**Connection form.** Pick the provider first; the form then shows only the fields that provider
+actually uses — queue manager and channel for IBM MQ, bootstrap servers for Kafka.
+
+<img alt="Connection form with the IBM MQ provider selected" src="docs/screenshots/connection-form.png">
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Logs.** A live view of what the process is doing, filterable by level, logger and time — useful for
+watching an operation land on the broker. In memory only, and emptied on restart.
+
+<img alt="Logs page with level filters and a live tail of broker operations" src="docs/screenshots/logs.png">
+
+</td>
+<td width="50%" valign="top">
+
+**Manual.** The whole tool explained in the order you need it, including a per-provider differences
+table generated from the same constants the UI branches on — so it cannot drift out of date.
+
+<img alt="Built-in manual with contents and the provider differences table" src="docs/screenshots/manual.png">
+
+</td>
+</tr>
+</table>
+
+---
+
 ## Requirements
 
 **To run:** a Java 21 or newer JRE. Nothing else.
