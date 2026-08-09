@@ -289,6 +289,28 @@ older Node will probably work, but it is not what the build uses.
 
 `mvn package -Pskip-frontend` skips the frontend build entirely for fast backend-only iteration.
 
+### Versioning and releases
+
+**There are no `-SNAPSHOT` versions here.** `main` always holds a real version, so the JAR you build
+locally is named exactly like the one on the release page — `mq-mebaysanization-1.0.3.jar`, never
+`…-1.0.3-SNAPSHOT.jar`. That is the entire reason for the scheme.
+
+Every push to `main` that touches something other than documentation cuts a release of **whatever the
+pom currently says**, in one commit:
+
+```
+pom 1.0.3  ->  tag v1.0.3 on the pushed commit itself (its pom already says 1.0.3)
+           ->  commit "chore(release): prepare 1.0.4"  (what main is left on)
+```
+
+The tag therefore points at the exact tree that was built, tested and put through the portability gate,
+rather than at a commit the workflow synthesised afterwards. The bump afterwards is always +1 patch, so
+**to release a minor or a major, edit `pom.xml` to `1.1.0` (or `2.0.0`) and push** — whatever the pom
+says is what ships.
+
+`.github/workflows/release.yml` refuses to run if the pom carries a `-SNAPSHOT`, if the version is not a
+plain `x.y.z`, or if its tag already exists. Each failure names the fix.
+
 ---
 
 ## Testing

@@ -1,12 +1,21 @@
 #
-# Cuts a release on every push to main: bump the version, build, prove it, tag it.
+# Cuts a release on every push to main: build what the pom says, prove it, tag it, bump for next time.
 #
-# The version flow is the Maven convention, in two commits:
+# THIS PROJECT DOES NOT USE -SNAPSHOT VERSIONS. main always holds a real, released version, so the JAR
+# on a developer's disk is named exactly like the one on the release page - mq-mebaysanization-1.0.3.jar,
+# never mq-mebaysanization-1.0.3-SNAPSHOT.jar. That is the whole point of the scheme, and it is why the
+# guard below rejects a -SNAPSHOT rather than requiring one.
 #
-#   pom 1.0.0-SNAPSHOT  ->  commit "release 1.0.0"          (tagged v1.0.0)
-#                       ->  commit "prepare 1.0.1-SNAPSHOT" (what main is left on)
+# The flow is one commit rather than the Maven-conventional two:
 #
-# so a tag always points at a pom holding a real, non-SNAPSHOT version.
+#   pom 1.0.3  ->  tag v1.0.3 on the pushed commit itself (its pom already says 1.0.3)
+#              ->  commit "prepare 1.0.4" (what main is left on, ready for the next push)
+#
+# The tag therefore points at the exact tree that was built and tested, rather than at a commit this
+# workflow synthesised afterwards.
+#
+# To release a minor or major instead of a patch, edit pom.xml to 1.1.0 (or 2.0.0) and push: whatever
+# the pom says is what gets released, and the bump afterwards is always +1 patch from there.
 #
 # THE LOOP GUARD. This workflow pushes to the branch that triggers it. It does not recurse, for two
 # independent reasons, and both are deliberate:
@@ -14,8 +23,8 @@
 #   1. Pushes made with the default GITHUB_TOKEN do not trigger workflows. This is a GitHub guarantee
 #      and it is the real guard. If you ever swap in a PAT or a deploy key to get around branch
 #      protection, this guarantee disappears and the workflow WILL recurse.
-#   2. Both commit messages carry [skip ci], which GitHub honours natively on push events. That is the
-#      backstop for case 1, and the reason the messages must not be "tidied up".
+#   2. The commit message carries [skip ci], which GitHub honours natively on push events. That is the
+#      backstop for case 1, and the reason the message must not be "tidied up".
 #
 name: Release
 
@@ -77,7 +86,7 @@ jobs:
           key: node-${{ runner.os }}-${{ hashFiles('pom.xml', 'frontend/package-lock.json') }}
           restore-keys: node-${{ runner.os }}-
 
-      - name: Work out the release and next development versions
+      - name: Work out the release and next versions
         id: versions
         run: |
           set -euo pipefail
@@ -85,43 +94,45 @@ jobs:
           # Read the project's own version, not the parent's. Namespace-aware and anchored to the root
           # element, so <parent><version>3.5.16</version></parent> cannot be picked up by mistake the
           # way a grep for the first <version> would.
-          current=$(python3 -c "import xml.etree.ElementTree as ET; ns={'m':'http://maven.apache.org/POM/4.0.0'}; print(ET.parse('pom.xml').getroot().find('m:version', ns).text.strip())")
+          release=$(python3 -c "import xml.etree.ElementTree as ET; ns={'m':'http://maven.apache.org/POM/4.0.0'}; print(ET.parse('pom.xml').getroot().find('m:version', ns).text.strip())")
 
-          if [[ "$current" != *-SNAPSHOT ]]; then
-            echo "::error::pom.xml is at $current, which is not a -SNAPSHOT."
-            echo "::error::main is expected to sit on a development version between releases."
-            echo "::error::Set it back to a -SNAPSHOT (or delete the tag from a half-finished release) and push again."
+          # Whatever the pom says IS the release - there is nothing to strip. A -SNAPSHOT here means
+          # someone reintroduced the convention this project deliberately dropped, and it would ship a
+          # JAR whose filename disagrees with the release page.
+          if [[ "$release" == *-SNAPSHOT ]]; then
+            echo "::error::pom.xml is at $release, but this project does not use -SNAPSHOT versions."
+            echo "::error::main always holds a real version, so the built JAR is named like the released one."
+            echo "::error::Set pom.xml to a plain x.y.z and push again."
             exit 1
           fi
 
-          release="${current%-SNAPSHOT}"
+          # The bump below is arithmetic on the patch component, so anything that is not three plain
+          # numbers has to be refused rather than silently producing a version like "1.0.3-RC1.1".
+          if [[ ! "$release" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::pom.xml is at $release, which is not a plain x.y.z version."
+            exit 1
+          fi
 
           if git rev-parse -q --verify "refs/tags/v$release" >/dev/null; then
-            echo "::error::Tag v$release already exists, so $current would release over it."
-            echo "::error::That usually means a previous run tagged but failed before pushing the next snapshot."
+            echo "::error::Tag v$release already exists, so this push would release over it."
+            echo "::error::main was expected to have been bumped past it by the previous release."
+            echo "::error::Set pom.xml to the version you actually mean to release and push again."
             exit 1
           fi
 
           IFS=. read -r major minor patch <<< "$release"
-          next="$major.$minor.$((patch + 1))-SNAPSHOT"
+          next="$major.$minor.$((patch + 1))"
 
           {
-            echo "current=$current"
             echo "release=$release"
             echo "next=$next"
           } >> "$GITHUB_OUTPUT"
 
-          echo "$current -> $release -> $next"
+          echo "releasing $release, then main moves to $next"
 
-      - name: Set the release version
-        run: >
-          mvn -B -ntp
-          org.codehaus.mojo:versions-maven-plugin:2.21.0:set
-          -DnewVersion=${{ steps.versions.outputs.release }}
-          -DgenerateBackupPoms=false
-
-      # The full build: tests, then the frontend, then the fat JAR. Tests run before prepare-package,
-      # so a test failure costs nothing in npm time.
+      # No versions:set before this one: the pom already holds the release version, which is the point
+      # of the scheme. The full build: tests, then the frontend, then the fat JAR. Tests run before
+      # prepare-package, so a test failure costs nothing in npm time.
       - name: Build and test
         run: mvn -B -ntp clean package
 
@@ -130,24 +141,24 @@ jobs:
       - name: Verify portability
         run: ./scripts/verify-portability.sh
 
-      # No stamping step here any more. pom.xml has no <finalName>, so Maven's default applies and the
-      # build above - which ran AFTER versions:set - already produced
-      # target/mq-mebaysanization-<release>.jar. A `cp` from the old unversioned name to the new one
-      # would now be `cp X X`, which is a hard error rather than a no-op.
+      # No stamping step here. pom.xml has no <finalName>, so Maven's default applies and the build
+      # above already produced target/mq-mebaysanization-<release>.jar. A `cp` from an unversioned name
+      # to the versioned one would now be `cp X X`, which is a hard error rather than a no-op.
 
-      - name: Commit the release version and tag it
+      # Tagged at the PUSHED commit, whose pom already says <release> - no synthesised release commit
+      # in between. The tag therefore points at the exact tree that was just built and tested.
+      - name: Tag the release
         run: |
           set -euo pipefail
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # [skip ci] is load-bearing, not decoration - see the loop-guard note at the top.
-          git add pom.xml
-          git commit -m "chore(release): ${{ steps.versions.outputs.release }} [skip ci]"
           git tag -a "v${{ steps.versions.outputs.release }}" \
                   -m "MQ mebaysanization ${{ steps.versions.outputs.release }}"
 
-      - name: Prepare the next development version
+      # main is left on the next version, so the following push releases that one. Still a real version,
+      # never a -SNAPSHOT: a developer building from main gets a JAR named exactly like a released one.
+      - name: Prepare the next version
         run: |
           set -euo pipefail
           mvn -B -ntp \
@@ -155,14 +166,15 @@ jobs:
             -DnewVersion=${{ steps.versions.outputs.next }} \
             -DgenerateBackupPoms=false
           git add pom.xml
+          # [skip ci] is load-bearing, not decoration - see the loop-guard note at the top.
           git commit -m "chore(release): prepare ${{ steps.versions.outputs.next }} [skip ci]"
 
-      # Atomic: either both commits and the tag land, or neither does. Without --atomic a push can
-      # leave the tag on the remote without the commit carrying the matching pom.
+      # Atomic: either the commit and the tag land, or neither does. Without --atomic a push can leave
+      # the tag on the remote while main still claims the version is unreleased.
       #
       # If someone pushed to main while this was building, this fails as a non-fast-forward and
       # NOTHING has been published - the tag so far exists only on the runner. Re-run the job.
-      - name: Push the commits and the tag
+      - name: Push the commit and the tag
         run: git push --atomic origin HEAD:main "refs/tags/v${{ steps.versions.outputs.release }}"
 
       - name: Create the GitHub release
