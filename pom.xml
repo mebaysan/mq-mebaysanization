@@ -33,16 +33,16 @@
         </license>
     </licenses>
 
-    <organization>
-        <name>BaysanSoft</name>
-        <url>https://mebaysan.com</url>
-    </organization>
-
+    <!--
+      Copyright is held personally, not by an entity - see LICENSE and NOTICE. The groupId stays
+      com.baysansoft because it is a namespace baked into every package path and every released
+      coordinate; it asserts nothing about ownership.
+    -->
     <developers>
         <developer>
             <id>mebaysan</id>
+            <name>mebaysan</name>
             <url>https://mebaysan.com</url>
-            <organization>BaysanSoft</organization>
         </developer>
     </developers>
 
