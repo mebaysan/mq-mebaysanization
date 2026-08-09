@@ -21,7 +21,7 @@ java -jar target/mq-mebaysanization-*.jar
 # then open http://localhost:8080
 ```
 
-The JAR carries its version in the filename — `mq-mebaysanization-1.0.2.jar` — so an archived or
+The JAR carries its version in the filename — `mq-mebaysanization-1.0.3.jar` — so an archived or
 downloaded copy says what it is without anyone having to rename it.
 
 ---
