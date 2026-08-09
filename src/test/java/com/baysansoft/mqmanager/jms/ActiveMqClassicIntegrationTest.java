@@ -3,6 +3,7 @@ package com.baysansoft.mqmanager.jms;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,11 +19,21 @@ import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
+import com.baysansoft.mqmanager.messaging.model.MessageType;
+import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 import com.baysansoft.mqmanager.support.EmbeddedActiveMqBroker;
 import com.baysansoft.mqmanager.support.MessagingTestFixture;
 import com.baysansoft.mqmanager.web.MqOperationException;
+
+import jakarta.jms.BytesMessage;
+import jakarta.jms.Connection;
+import jakarta.jms.ConnectionFactory;
+import jakarta.jms.Message;
+import jakarta.jms.MessageConsumer;
+import jakarta.jms.Session;
+import jakarta.jms.TextMessage;
 
 /**
  * End-to-end coverage of the real {@link JmsMessagingOperations} against an in-process ActiveMQ Classic
@@ -76,6 +87,106 @@ class ActiveMqClassicIntegrationTest {
         assertThat(view.enqueueTime()).isNotNull();
         assertThat(view.properties()).containsEntry("tenant", "acme").containsEntry("kind", "greeting");
         assertThat(view.headers()).containsKey("JMSMessageID").containsKey("JMSTimestamp");
+    }
+
+    /**
+     * Takes one message off a queue as a raw JMS client, bypassing {@link MessageMapper} entirely.
+     *
+     * <p>The browse-based assertions below go through the production mapper, which renders a bytes
+     * message as decoded text — so they cannot tell a {@code BytesMessage} carrying raw UTF-8 from one
+     * written with {@code writeUTF}. This can. Destructive, so give it its own queue.
+     */
+    private static Message receiveRaw(String queue) throws Exception {
+        ConnectionFactory factory = MessagingTestFixture.registry()
+                .forProvider(Provider.ACTIVE_MQ).build(profile, null);
+        try (Connection connection = factory.createConnection()) {
+            connection.start();
+            try (Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+                    MessageConsumer consumer = session.createConsumer(session.createQueue(queue))) {
+                return consumer.receive(2_000);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a BYTES send comes back from a browse as a bytes message, decoded, with a note saying so")
+    void bytesSendIsVisibleAsABytesMessage() {
+        String queue = uniqueQueue("bytes.");
+
+        messaging.send(profile, queue,
+                new OutboundMessage("hello wörld", Map.of("tenant", "acme"), null, MessageType.BYTES));
+
+        QueueMessageView view = messaging.browse(profile, queue, 1).messages().get(0);
+
+        // endsWith, not isEqualTo: the concrete class belongs to the client, and ActiveMQ Classic and
+        // Artemis both happen to call theirs ActiveMQBytesMessage — the exact ambiguity ImportGuardTest
+        // exists to keep out of src/main.
+        assertThat(view.type()).endsWith("BytesMessage");
+        // Twelve bytes for eleven characters: ö is two bytes in UTF-8.
+        assertThat(view.note()).contains("Bytes message").contains("12 bytes");
+        assertThat(view.body()).isEqualTo("hello wörld");
+        assertThat(view.properties()).containsEntry("tenant", "acme");
+    }
+
+    @Test
+    @DisplayName("a BYTES body is on the queue as the exact UTF-8 bytes of what was typed, with no length "
+            + "prefix — writeUTF would silently have written modified UTF-8 instead")
+    void bytesBodyIsRawUtf8() throws Exception {
+        String queue = uniqueQueue("raw.");
+        messaging.send(profile, queue,
+                new OutboundMessage("hello wörld", Map.of(), null, MessageType.BYTES));
+
+        Message received = receiveRaw(queue);
+
+        // This is the assertion the whole feature rests on. A reader that requires bytes gets these
+        // bytes and nothing else: no two-byte length prefix, no CESU-8 surrogate pairs.
+        assertThat(received).isInstanceOf(BytesMessage.class);
+        BytesMessage bytes = (BytesMessage) received;
+        byte[] buffer = new byte[(int) bytes.getBodyLength()];
+        bytes.readBytes(buffer);
+        assertThat(buffer).isEqualTo("hello wörld".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    @DisplayName("a TEXT send is still a text message on the wire, so nothing that worked before changed")
+    void textSendIsStillATextMessage() throws Exception {
+        String queue = uniqueQueue("text.");
+        messaging.send(profile, queue,
+                new OutboundMessage("hello", Map.of(), null, MessageType.TEXT));
+
+        assertThat(receiveRaw(queue)).isInstanceOf(TextMessage.class);
+    }
+
+    @Test
+    @DisplayName("a send that names no message type at all is a text message, which is the "
+            + "backwards-compatible default every existing caller relies on")
+    void absentMessageTypeIsATextMessage() throws Exception {
+        String queue = uniqueQueue("default.");
+        messaging.send(profile, queue, new OutboundMessage("hello", Map.of(), null, null));
+
+        assertThat(receiveRaw(queue)).isInstanceOf(TextMessage.class);
+    }
+
+    @Test
+    @DisplayName("an empty body sent as BYTES is a zero-length bytes message, not a message with no body")
+    void emptyBytesBodyIsStillABytesMessage() throws Exception {
+        String queue = uniqueQueue("emptybytes.");
+        messaging.send(profile, queue, new OutboundMessage("", Map.of(), null, MessageType.BYTES));
+
+        Message received = receiveRaw(queue);
+
+        assertThat(received).isInstanceOf(BytesMessage.class);
+        assertThat(((BytesMessage) received).getBodyLength()).isZero();
+    }
+
+    @Test
+    @DisplayName("a message key is refused on a JMS provider rather than dropped, since a send that "
+            + "reported success would look like the key had been honoured")
+    void messageKeyIsRefused() {
+        assertThatThrownBy(() -> messaging.send(profile, uniqueQueue("keyed."),
+                new OutboundMessage("body", Map.of(), "customer-7", null)))
+                .isInstanceOfSatisfying(MqOperationException.class,
+                        e -> assertThat(e.getCode()).isEqualTo("OPERATION_NOT_SUPPORTED"));
     }
 
     @Test

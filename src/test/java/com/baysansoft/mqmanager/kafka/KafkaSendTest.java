@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
+import com.baysansoft.mqmanager.messaging.model.MessageType;
+import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.support.KafkaTestFixture;
 import com.baysansoft.mqmanager.web.MqOperationException;
 
@@ -37,11 +39,16 @@ class KafkaSendTest {
         profile = KafkaTestFixture.profile();
     }
 
+    /** A plain send: no key, no properties, and — crucially — no message type to object to. */
+    private static OutboundMessage body(String body) {
+        return new OutboundMessage(body, Map.of(), null, null);
+    }
+
     @Test
     @DisplayName("a sent record carries the body as UTF-8, the key, and every property as a record header")
     void sendsBodyKeyAndHeaders() {
-        messaging.send(profile, KafkaTestFixture.TOPIC, "hello wörld",
-                Map.of("tenant", "acme"), "customer-7");
+        messaging.send(profile, KafkaTestFixture.TOPIC,
+                new OutboundMessage("hello wörld", Map.of("tenant", "acme"), "customer-7", null));
 
         assertThat(producer.history()).hasSize(1);
         ProducerRecord<String, byte[]> sent = producer.history().get(0);
@@ -59,7 +66,7 @@ class KafkaSendTest {
     @Test
     @DisplayName("send returns the topic-partition-offset id the browse view will show for that record")
     void returnsAnIdThatRoundTrips() {
-        String messageId = messaging.send(profile, KafkaTestFixture.TOPIC, "body", Map.of(), null);
+        String messageId = messaging.send(profile, KafkaTestFixture.TOPIC, body("body"));
 
         assertThat(messageId).isEqualTo(KafkaTestFixture.TOPIC + "-0-0");
         // The id must survive a trip back through the single-message endpoint, which is the whole
@@ -71,7 +78,7 @@ class KafkaSendTest {
     @Test
     @DisplayName("no key means a record with a null key, not an empty one — they partition differently")
     void absentKeyIsNullNotEmpty() {
-        messaging.send(profile, KafkaTestFixture.TOPIC, "body", Map.of(), null);
+        messaging.send(profile, KafkaTestFixture.TOPIC, body("body"));
 
         assertThat(producer.history().get(0).key()).isNull();
     }
@@ -79,7 +86,7 @@ class KafkaSendTest {
     @Test
     @DisplayName("a null body sends an empty record rather than a tombstone")
     void nullBodyIsEmptyNotATombstone() {
-        messaging.send(profile, KafkaTestFixture.TOPIC, null, Map.of(), null);
+        messaging.send(profile, KafkaTestFixture.TOPIC, body(null));
 
         // A null value on a compacted topic is a delete marker. Sending one because the textarea was
         // left empty would quietly remove a key.
@@ -89,9 +96,35 @@ class KafkaSendTest {
     @Test
     @DisplayName("the producer is closed once the send completes, since one is opened per operation")
     void closesAfterSuccess() {
-        messaging.send(profile, KafkaTestFixture.TOPIC, "body", Map.of(), null);
+        messaging.send(profile, KafkaTestFixture.TOPIC, body("body"));
 
         assertThat(producer.closed()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a Kafka send with no message type still works, since omitting it is what every "
+            + "caller written before the choice existed does")
+    void absentMessageTypeIsAccepted() {
+        messaging.send(profile, KafkaTestFixture.TOPIC, body("body"));
+
+        assertThat(producer.history()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("any explicit message type is refused on Kafka, TEXT included — its record values are "
+            + "bytes already, so agreeing to TEXT would imply a choice Kafka never had")
+    void explicitMessageTypeIsRefused() {
+        for (MessageType type : MessageType.values()) {
+            assertThatThrownBy(() -> messaging.send(profile, KafkaTestFixture.TOPIC,
+                    new OutboundMessage("body", Map.of(), null, type)))
+                    .isInstanceOfSatisfying(MqOperationException.class, e -> {
+                        assertThat(e.getCode()).isEqualTo("OPERATION_NOT_SUPPORTED");
+                        assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    });
+        }
+        // Refused before the producer is ever opened, so nothing reached the topic on the way to the
+        // error. A rejection that had already sent the record would be the worst of both answers.
+        assertThat(producer.history()).isEmpty();
     }
 
     @Test
@@ -102,7 +135,7 @@ class KafkaSendTest {
         producer.sendException = new TimeoutException("Topic orders not present in metadata after 5000 ms");
 
         assertThatThrownBy(() ->
-                messaging.send(profile, KafkaTestFixture.TOPIC, "body", Map.of(), null))
+                messaging.send(profile, KafkaTestFixture.TOPIC, body("body")))
                 .isInstanceOfSatisfying(MqOperationException.class, e -> {
                     assertThat(e.getCode()).isEqualTo("QUEUE_NOT_FOUND");
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
@@ -117,7 +150,7 @@ class KafkaSendTest {
         producer.sendException = new TimeoutException("Timed out waiting for a node assignment");
 
         assertThatThrownBy(() ->
-                messaging.send(profile, KafkaTestFixture.TOPIC, "body", Map.of(), null))
+                messaging.send(profile, KafkaTestFixture.TOPIC, body("body")))
                 .isInstanceOfSatisfying(MqOperationException.class, e -> {
                     assertThat(e.getCode()).isEqualTo("BROKER_UNREACHABLE");
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT);

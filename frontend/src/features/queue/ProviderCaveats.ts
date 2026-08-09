@@ -32,6 +32,11 @@ export interface ProviderCaveat {
   deleteNote: string | null
   /** True shows the optional record-key field on the send form. */
   hasMessageKey: boolean
+  /**
+   * True shows the Text/Bytes choice on the send form. False on Kafka, whose record values are already
+   * bytes — the server rejects an explicit choice there rather than ignoring one.
+   */
+  hasMessageType: boolean
   /** What the send form calls its key/value rows. */
   propertiesLabel: string
   /** Label for the button and the modal that browses the broker, e.g. "Browse queues". */
@@ -59,6 +64,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
       'On very deep queues ActiveMQ Classic will not hand a specific message to a selector, so an ' +
       'individual delete can fail even though the message is visible above.',
     hasMessageKey: false,
+    hasMessageType: true,
     propertiesLabel: 'Custom properties',
     listLabel: 'Browse queues and topics',
     listNote:
@@ -82,6 +88,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     canDeleteOneMessage: true,
     deleteNote: null,
     hasMessageKey: false,
+    hasMessageType: true,
     propertiesLabel: 'Custom properties',
     listLabel: 'Browse queues and topics',
     listNote:
@@ -105,6 +112,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     canDeleteOneMessage: true,
     deleteNote: null,
     hasMessageKey: false,
+    hasMessageType: true,
     propertiesLabel: 'Custom properties',
     listLabel: 'Browse queues and topics',
     listNote:
@@ -130,6 +138,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     canDeleteOneMessage: false,
     deleteNote: null,
     hasMessageKey: true,
+    hasMessageType: false,
     propertiesLabel: 'Record headers',
     listLabel: 'Browse topics',
     listNote:

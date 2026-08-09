@@ -9,6 +9,7 @@ import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
+import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 
@@ -41,19 +42,21 @@ public interface MessagingOperations {
     ConnectionTestResult testConnection(ConnectionProfile profile, String plainPassword);
 
     /**
-     * @param key the Kafka record key, which decides the partition. Null for every JMS provider — they
-     *            have no equivalent, and pass a non-null key at your peril: they reject it rather than
-     *            dropping it silently.
      * @return the id assigned by the broker: a {@code JMSMessageID} for the JMS providers, or
      *         {@code topic-partition-offset} for Kafka
      */
-    String send(ConnectionProfile profile, String queueName, String body, Map<String, String> properties,
-            String key);
+    String send(ConnectionProfile profile, String queueName, OutboundMessage message);
 
-    /** Sends without a key, which is the only form the JMS providers support. */
+    /**
+     * Sends a text message with no key, which is the only form every provider supports unconditionally.
+     *
+     * <p>There is deliberately no overload that takes a key but not a message type. It would have to
+     * pick a message type on the caller's behalf, and picking one silently is the exact failure this
+     * type exists to make impossible.
+     */
     default String send(ConnectionProfile profile, String queueName, String body,
             Map<String, String> properties) {
-        return send(profile, queueName, body, properties, null);
+        return send(profile, queueName, OutboundMessage.text(body, properties));
     }
 
     /**

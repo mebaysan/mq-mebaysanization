@@ -51,6 +51,7 @@ import com.baysansoft.mqmanager.messaging.model.DestinationEntry;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 import com.baysansoft.mqmanager.messaging.model.DestinationListings;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
+import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 import com.baysansoft.mqmanager.web.MqOperationException;
@@ -142,19 +143,27 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
     // ------------------------------------------------------------------ send
 
     @Override
-    public String send(ConnectionProfile profile, String topic, String body,
-                       Map<String, String> headers, String key) {
+    public String send(ConnectionProfile profile, String topic, OutboundMessage outbound) {
+        if (outbound.messageType() != null) {
+            // Rejected rather than ignored, for the same reason a key is rejected on the JMS providers:
+            // a field the tool will not act on must never come back inside a 201 that reads like it was
+            // honoured. Note this tests for null, not for BYTES — accepting TEXT would imply Kafka
+            // considered the question and agreed, when Kafka has no such question.
+            throw new MqOperationException("OPERATION_NOT_SUPPORTED", HttpStatus.BAD_REQUEST,
+                    "A message type applies only to the JMS providers, where TEXT and BYTES are "
+                            + "different message classes on the wire. Every Kafka record value is bytes "
+                            + "already, so there is nothing to choose.");
+        }
+        String body = outbound.body();
         return withProducer(profile, "send a message", producer -> {
             List<Header> recordHeaders = new ArrayList<>();
-            if (headers != null) {
-                headers.forEach((name, value) -> recordHeaders.add(new RecordHeader(name,
-                        value == null ? null : value.getBytes(StandardCharsets.UTF_8))));
-            }
-            byte[] value = (body == null ? "" : body).getBytes(StandardCharsets.UTF_8);
+            outbound.properties().forEach((name, value) -> recordHeaders.add(new RecordHeader(name,
+                    value == null ? null : value.getBytes(StandardCharsets.UTF_8))));
+            byte[] value = body.getBytes(StandardCharsets.UTF_8);
             // Null partition, so Kafka's partitioner decides: by key when there is one, round-robin
             // otherwise. Passing an empty key instead of null would change that, and not for the better.
             ProducerRecord<String, byte[]> record = new ProducerRecord<>(topic, null, null,
-                    emptyToNull(key), value, recordHeaders);
+                    emptyToNull(outbound.key()), value, recordHeaders);
 
             RecordMetadata metadata = producer.send(record).get(apiTimeoutMs(), TimeUnit.MILLISECONDS);
             logSend(topic, body, metadata);

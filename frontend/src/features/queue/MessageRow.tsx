@@ -86,6 +86,13 @@ export function MessageRow({
         </td>
         <td className="px-3 py-2 align-top text-xs text-slate-600">
           {formatTime(message.enqueueTime)}
+          {/* Shown verbatim: this is JMSType when the sender set one and the message class otherwise,
+              so guessing at a friendlier label would sometimes rename the user's own value. */}
+          {message.type && (
+            <span className="mt-0.5 block font-mono text-[11px] text-slate-400" title={message.type}>
+              {message.type}
+            </span>
+          )}
         </td>
         <td className="px-3 py-2 align-top font-mono text-xs text-slate-700">
           {preview(message.body)}

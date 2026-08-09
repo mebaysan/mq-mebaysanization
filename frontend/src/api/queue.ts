@@ -6,6 +6,7 @@ import type {
   BrowseResult,
   DeleteMessageResult,
   DepthResult,
+  MessageType,
   PurgeResult,
   QueueMessage,
   SendMessageResult,
@@ -58,7 +59,12 @@ export function useSendMessage(id: number, queueName: string) {
   return useQueueMutation(
     id,
     queueName,
-    (body: { payload: string; properties: Record<string, string>; key: string | null }) =>
+    (body: {
+      payload: string
+      properties: Record<string, string>
+      key: string | null
+      messageType: MessageType | null
+    }) =>
       api.post<SendMessageResult>(
         `/api/connections/${id}/queue/messages?${queueQuery(queueName)}`,
         body,

@@ -46,6 +46,15 @@ export interface ConnectionTestResult {
 export type DestinationKind = 'QUEUE' | 'TOPIC' | 'UNKNOWN'
 
 /**
+ * How a message body goes onto the wire, on the JMS providers only.
+ *
+ * `BYTES` produces a JMS BytesMessage, which a broker converts to an AMQP binary body; `TEXT` produces a
+ * TextMessage, which crosses as an AMQP string. Some AMQP 1.0 clients accept only the former, so this is
+ * never chosen on the user's behalf. Kafka rejects any value — its record values are bytes already.
+ */
+export type MessageType = 'TEXT' | 'BYTES'
+
+/**
  * How much of a destination listing to trust.
  *
  * An empty `destinations` array means "there is genuinely nothing here" ONLY when this is `COMPLETE`.

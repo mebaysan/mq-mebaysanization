@@ -324,7 +324,7 @@ export default function ManualPage() {
           The key/value rows are named for whatever the provider calls them, and Kafka adds one extra
           field that no JMS broker has:
         </p>
-        <Table head={['Provider', 'Key/value rows are', 'Message key']}>
+        <Table head={['Provider', 'Key/value rows are', 'Message key', 'Body type']}>
           {PROVIDERS.map((provider) => {
             const caveat = PROVIDER_CAVEATS[provider]
             return (
@@ -334,6 +334,9 @@ export default function ManualPage() {
                 </td>
                 <td className="px-3 py-2">{caveat.propertiesLabel}</td>
                 <td className="px-3 py-2">{caveat.hasMessageKey ? <Yes /> : <No />}</td>
+                <td className="px-3 py-2">
+                  {caveat.hasMessageType ? 'Text or bytes' : 'Bytes — no choice to make'}
+                </td>
               </tr>
             )
           })}
@@ -341,7 +344,17 @@ export default function ManualPage() {
         <p>
           On Kafka, a <strong>key</strong> decides which partition the record lands on: records
           sharing a key go to the same partition and stay in order relative to each other. Leave it
-          blank and Kafka spreads records across partitions. Everything is sent as text.
+          blank and Kafka spreads records across partitions.
+        </p>
+        <p>
+          On the JMS providers you also choose a <strong>body type</strong>. <strong>Text</strong> is
+          the default and is what you want almost always. Choose <strong>Bytes</strong> when the
+          reader is an AMQP 1.0 client that will not accept a string body: a JMS text message crosses
+          to AMQP as a string, a bytes message as binary, and some clients — Python 2 Qpid among them
+          — reject the first outright. Bytes sends the UTF-8 encoding of the body you typed, so it is
+          your text as bytes rather than a way to send arbitrary binary. Kafka has no such choice: its
+          record values are bytes already, and it refuses an explicit body type rather than accepting
+          one it would not act on.
         </p>
       </Section>
 

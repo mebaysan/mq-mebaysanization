@@ -15,6 +15,8 @@ import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.messaging.MessagingOperations;
 import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
+import com.baysansoft.mqmanager.messaging.model.MessageType;
+import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 import com.baysansoft.mqmanager.service.ConnectionProfileService;
 import com.baysansoft.mqmanager.web.dto.QueueResponses.DeleteMessageResponse;
@@ -63,8 +65,11 @@ public class QueueController {
     public ResponseEntity<SendMessageResponse> send(@PathVariable Long id,
                                                     @RequestParam String queueName,
                                                     @Valid @RequestBody SendMessageRequest request) {
-        String messageId = messaging.send(profile(id), requireQueueName(queueName),
-                request.payload(), request.properties(), request.key());
+        // parseOptional, not parse: an omitted message type must stay exactly what it has always been —
+        // a text message on the JMS providers, and nothing at all to object to on Kafka.
+        OutboundMessage message = new OutboundMessage(request.payload(), request.properties(),
+                request.key(), MessageType.parseOptional(request.messageType()));
+        String messageId = messaging.send(profile(id), requireQueueName(queueName), message);
         return ResponseEntity.status(HttpStatus.CREATED).body(new SendMessageResponse(messageId));
     }
 

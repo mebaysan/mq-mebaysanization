@@ -15,6 +15,8 @@ import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
+import com.baysansoft.mqmanager.messaging.model.MessageType;
+import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 import com.baysansoft.mqmanager.support.EmbeddedArtemisBroker;
@@ -77,6 +79,21 @@ class ArtemisIntegrationTest {
         assertThat(view.messageId()).isEqualTo(messageId);
         assertThat(view.body()).isEqualTo("artemis payload");
         assertThat(view.properties()).containsEntry("tenant", "acme");
+    }
+
+    @Test
+    @DisplayName("a BYTES send is a bytes message on Artemis too, so the choice is not ActiveMQ-specific")
+    void bytesSendIsABytesMessage() {
+        String queue = uniqueQueue();
+
+        messaging.send(profile, queue,
+                new OutboundMessage("artemis wörld", Map.of(), null, MessageType.BYTES));
+
+        QueueMessageView view = messaging.browse(profile, queue, 1).messages().get(0);
+
+        assertThat(view.type()).endsWith("BytesMessage");
+        assertThat(view.body()).isEqualTo("artemis wörld");
+        assertThat(view.note()).contains("Bytes message");
     }
 
     @Test

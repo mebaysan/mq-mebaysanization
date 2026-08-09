@@ -255,7 +255,7 @@ things below.
 | Depth | Browse-and-count, capped at 10,000, sometimes `N+` | `Σ(end offset − start offset)` across partitions. **Exact**, and never `N+` — but it counts records **retained**, not records unconsumed. Records a consumer group has already read still count until retention removes them. The UI labels it "Retained", not "Depth" |
 | Purge | Consumes in a loop | `deleteRecords()` truncates each partition to its end offset. Needs the **`Delete`** ACL on the topic. Records produced after the truncation point survive, and the disk space comes back asynchronously |
 | Delete one | A selector on `JMSMessageID` | **Impossible** — 501 `OPERATION_NOT_SUPPORTED`. The button is not rendered |
-| Send | `TextMessage` + string properties | `ProducerRecord` with an optional **key** (it chooses the partition) and headers. Properties become record headers, UTF-8 encoded, and come back as properties. Returns `topic-partition-offset` |
+| Send | `TextMessage` **or** `BytesMessage` — your choice per send — plus string properties | `ProducerRecord` with an optional **key** (it chooses the partition) and headers. Properties become record headers, UTF-8 encoded, and come back as properties. Returns `topic-partition-offset` |
 | Body | Text, bytes and map messages | Bytes, decoded as UTF-8. A **null value is a tombstone** and is labelled as one rather than shown as an empty body — on a compacted topic it marks the key for deletion |
 
 Two more things worth knowing:
@@ -271,6 +271,22 @@ Two more things worth knowing:
 `ObjectMessage` bodies are **deliberately not deserialized** — only the headers and properties are
 shown. Deserializing an arbitrary payload merely to display it is a remote-code-execution risk, and this
 tool has no authentication in front of it. Text, bytes and map messages render normally.
+
+**Sending as text or as bytes.** On the JMS providers the send form offers **Text** and **Bytes**, and the
+difference is not cosmetic. A broker converting JMS to AMQP 1.0 turns a `TextMessage` into an
+`amqp-value(String)` body and a `BytesMessage` into a `Data` (binary) body. A Python 2 Qpid client maps the
+first to `unicode` and the second to `str` — and a reader that requires `str` rejects the first outright.
+If a downstream consumer dies with
+
+```
+TypeError: Content must be str, found <type 'unicode'>
+```
+
+that is this, and sending the same payload as **Bytes** is the fix. Bytes sends the UTF-8 encoding of what
+you typed, so it is "your text as bytes" rather than an arbitrary-binary channel. Two caveats: the mapping
+above is ActiveMQ Classic's default AMQP transformer, so a connector configured `?transformer=native` or
+`raw` may differ; and IBM MQ is not an AMQP story at all — there a bytes message is `MQFMT_NONE`, which
+still helps a native `MQGET` reader but for different reasons.
 
 ---
 
@@ -477,6 +493,11 @@ auto-creates).
 The embedded test brokers run with security disabled, so they cannot catch a credentials-plumbing bug.
 Do one manual pass against an ActiveMQ or Artemis broker with authentication **on**.
 
+The test brokers also have **no AMQP connector** — `activemq-amqp` is not a dependency, so the suite can
+prove a bytes send really is a `BytesMessage` carrying the exact UTF-8 bytes, but not what the AMQP
+conversion then does with it. If you rely on the Bytes option for an AMQP 1.0 reader, send one message
+that way against the real broker and confirm the reader accepts it.
+
 ---
 
 ## The Logs page
@@ -577,8 +598,11 @@ client-side thing the picker does over the page it already has, and it says so.
 On `PUT`, omitting `password` keeps the stored one and sending `""` clears it — the current value is
 never sent to the client, so an unchanged edit form has nothing to resubmit.
 
-`POST .../messages` takes `{"payload", "properties", "key"}`. `key` is **Kafka only** — it selects the
-partition — and the JMS providers reject a non-null one rather than dropping it silently.
+`POST .../messages` takes `{"payload", "properties", "key", "messageType"}`. `key` is **Kafka only** —
+it selects the partition — and the JMS providers reject a non-null one rather than dropping it silently.
+`messageType` is the mirror image: **JMS only**, `TEXT` (the default when omitted) or `BYTES`, and Kafka
+rejects any value because its record values are bytes already. Both are case-insensitive; an unknown one
+is a 400 that names the values that would have worked.
 
 Errors always come back as `{"status", "error", "message"}`, plus a stable machine-readable `code`
 (`BROKER_AUTH_FAILED`, `QUEUE_NOT_FOUND`, `MESSAGE_UNREACHABLE`, …). Stack traces are never returned.
@@ -605,6 +629,7 @@ Kafka adds a few codes of its own, all in the same shape:
 | `PURGE_PARTIAL` | 409 | Some partitions truncated, others refused. The message says how many records went and how many partitions failed |
 | `BROKER_NOT_AUTHORIZED` | 403 | Connected and authenticated, but the ACL for this operation is missing. Distinct from `BROKER_AUTH_FAILED` (401), which is a bad password |
 | `QUEUE_NAME_INVALID` | 400 | Kafka rejected the topic name itself |
+| `OPERATION_NOT_SUPPORTED` | 400 | Sending with a `messageType`. Every Kafka record value is bytes already, so there is nothing to choose — refused rather than quietly ignored |
 | `COMPRESSION_CODEC_UNAVAILABLE` | 502 | A compressed batch whose native codec could not load on this platform |
 
 ---
@@ -642,7 +667,8 @@ deleting topics.
   rather than a list. **Typing a name always works**, on every provider, in every one of those cases.
 - Remembered destinations live in the database next to the connection, not in the browser. They are
   bookmarks, not an audit trail — this build has no users to attribute anything to.
-- Messages are treated as text.
+- A message is sent as text unless you choose bytes; see **Message bodies** for when that matters.
+  Inbound bodies are rendered as text wherever the message type allows it.
 - A browse is a point-in-time snapshot, not a live view.
 
 ## Troubleshooting

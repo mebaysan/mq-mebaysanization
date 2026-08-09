@@ -1,5 +1,6 @@
 package com.baysansoft.mqmanager.jms;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.Enumeration;
@@ -23,10 +24,12 @@ import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
+import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 import com.baysansoft.mqmanager.web.MqOperationException;
 
+import jakarta.jms.BytesMessage;
 import jakarta.jms.Connection;
 import jakarta.jms.ConnectionFactory;
 import jakarta.jms.JMSException;
@@ -36,7 +39,6 @@ import jakarta.jms.MessageProducer;
 import jakarta.jms.Queue;
 import jakarta.jms.QueueBrowser;
 import jakarta.jms.Session;
-import jakarta.jms.TextMessage;
 
 /**
  * One implementation of every queue operation, shared by the three providers that speak
@@ -108,9 +110,8 @@ public class JmsMessagingOperations implements ProviderMessagingOperations {
     }
 
     @Override
-    public String send(ConnectionProfile profile, String queueName, String body,
-                       Map<String, String> propertiesToSet, String key) {
-        if (key != null) {
+    public String send(ConnectionProfile profile, String queueName, OutboundMessage outbound) {
+        if (outbound.key() != null) {
             // Rejected rather than dropped. A key decides the Kafka partition; silently discarding one
             // would look like it had been honoured.
             throw new MqOperationException("OPERATION_NOT_SUPPORTED", HttpStatus.BAD_REQUEST,
@@ -122,19 +123,51 @@ public class JmsMessagingOperations implements ProviderMessagingOperations {
             builder.tuneDestination(queue);
 
             try (MessageProducer producer = session.createProducer(queue)) {
-                TextMessage message = session.createTextMessage(body == null ? "" : body);
-                if (propertiesToSet != null) {
-                    for (Map.Entry<String, String> property : propertiesToSet.entrySet()) {
-                        // setStringProperty, never setObjectProperty: what the user typed is text, and
-                        // the value must round-trip as text when the message is browsed back.
-                        message.setStringProperty(property.getKey(), property.getValue());
-                    }
+                Prepared prepared = prepare(session, outbound);
+                for (Map.Entry<String, String> property : outbound.properties().entrySet()) {
+                    // setStringProperty, never setObjectProperty: what the user typed is text, and the
+                    // value must round-trip as text when the message is browsed back. Properties are
+                    // independent of the body, so this is identical for both message types.
+                    prepared.message().setStringProperty(property.getKey(), property.getValue());
                 }
-                producer.send(message);
-                logSend(queueName, body);
-                return message.getJMSMessageID();
+                producer.send(prepared.message());
+                logSend(queueName, outbound.body(), prepared);
+                return prepared.message().getJMSMessageID();
             }
         });
+    }
+
+    /**
+     * Builds the body in the form the caller asked for.
+     *
+     * <p>The two are not interchangeable once the message leaves the broker over AMQP 1.0: a text
+     * message is converted to an {@code amqp-value(String)} section and a bytes message to a
+     * {@code Data} (binary) section. A Python 2 Qpid client maps the first to {@code unicode} and the
+     * second to {@code str}, and a reader that requires bytes accepts only the second.
+     *
+     * <p>No {@code default} branch: this switch must keep failing to compile when a message type is
+     * added, so nobody ever gets a silently wrong body.
+     */
+    private static Prepared prepare(Session session, OutboundMessage outbound) throws JMSException {
+        String body = outbound.body();
+        return switch (outbound.messageTypeOrDefault()) {
+            case TEXT -> new Prepared(session.createTextMessage(body), body.length(), "characters");
+            case BYTES -> {
+                // writeBytes, never writeUTF. writeUTF prefixes a two-byte length and encodes in Java's
+                // modified UTF-8 (U+0000 as two bytes, supplementary characters as surrogate pairs), so
+                // what landed on the queue would not be the bytes of what the user typed.
+                byte[] encoded = body.getBytes(StandardCharsets.UTF_8);
+                BytesMessage message = session.createBytesMessage();
+                message.writeBytes(encoded);
+                // A zero-length body is still a body: an empty Data section, which an AMQP reader sees
+                // as an empty string rather than as a message with no body at all.
+                yield new Prepared(message, encoded.length, "bytes");
+            }
+        };
+    }
+
+    /** Carries the size in the unit that actually applies, so the log never calls bytes "characters". */
+    private record Prepared(Message message, int size, String unit) {
     }
 
     /**
@@ -461,9 +494,14 @@ public class JmsMessagingOperations implements ProviderMessagingOperations {
     }
 
     /** INFO records that a send happened and how big it was; the body itself needs an explicit opt-in. */
-    private void logSend(String queueName, String body) {
-        log.info("Sent a message to '{}' ({} characters)", queueName, body == null ? 0 : body.length());
+    private void logSend(String queueName, String body, Prepared prepared) {
+        // The size comes from the message that was actually built, so a bytes send reports bytes.
+        // body.length() would under-report every non-ASCII payload — "hello wörld" is 11 characters
+        // and 12 bytes — and byte-level accuracy is the whole point of offering the choice.
+        log.info("Sent a message to '{}' ({} {})", queueName, prepared.size(), prepared.unit());
         if (properties.isLogPayloads() && log.isDebugEnabled()) {
+            // The text the user typed, whichever type was sent: it is what they will search the log
+            // for, and the hex of its UTF-8 encoding tells nobody anything.
             log.debug("Payload sent to '{}': {}", queueName, body);
         }
     }
