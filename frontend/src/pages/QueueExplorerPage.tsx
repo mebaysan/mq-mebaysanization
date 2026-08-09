@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 
 import { ApiError } from '../api/client'
 import { useConnection } from '../api/connections'
 import { useDeleteMessage, useDepth, useMessages, usePurgeQueue } from '../api/queue'
-import type { QueueMessage } from '../api/types'
+import { useRecordOpen } from '../api/savedDestinations'
+import type { DestinationKind, QueueMessage } from '../api/types'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import {
   EmptyState,
@@ -16,6 +17,8 @@ import {
   secondaryButtonClass,
 } from '../components/Primitives'
 import { useToast } from '../components/ToastProvider'
+import { DestinationPicker } from '../features/destinations/DestinationPicker'
+import { RecentDestinations } from '../features/destinations/RecentDestinations'
 import { MessageRow } from '../features/queue/MessageRow'
 import { DEFAULT_CAVEAT, PROVIDER_CAVEATS } from '../features/queue/ProviderCaveats'
 import { SendPanel } from '../features/queue/SendPanel'
@@ -42,9 +45,29 @@ export default function QueueExplorerPage() {
 
   const [pendingDelete, setPendingDelete] = useState<QueueMessage | null>(null)
   const [confirmPurge, setConfirmPurge] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   // Never null: a blank noun would render as a missing word rather than as a loading state.
   const caveats = connection.data ? PROVIDER_CAVEATS[connection.data.provider] : DEFAULT_CAVEAT
+
+  const recordOpen = useRecordOpen(connectionId)
+  // What the picker said this destination was, when it came from the picker. A typed name leaves this
+  // undefined and the server derives the kind from the provider.
+  const pickedKind = useRef<Map<string, DestinationKind>>(new Map())
+  // Guards against StrictMode's double-effect and ordinary re-renders inflating openCount.
+  const recorded = useRef<string | null>(null)
+
+  // The URL is the single source of truth for what is open, so recording hangs off it: typing a name,
+  // following a deep link and picking from the browse list all arrive here and are recorded identically.
+  useEffect(() => {
+    if (!hasQueue) return
+    const token = `${connectionId}:${activeQueue}`
+    if (recorded.current === token) return
+    recorded.current = token
+    recordOpen.mutate({ name: activeQueue, kind: pickedKind.current.get(activeQueue) })
+    // recordOpen is a stable mutation object; depending on it would re-fire on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionId, activeQueue, hasQueue])
 
   const openQueue = (event: React.FormEvent) => {
     event.preventDefault()
@@ -117,18 +140,36 @@ export default function QueueExplorerPage() {
         </div>
       </div>
 
-      <form onSubmit={openQueue} className="flex gap-2">
-        <input
-          className={`${inputClass} mt-0`}
-          value={queueInput}
-          onChange={(event) => setQueueInput(event.target.value)}
-          placeholder={caveats.namePlaceholder}
-          aria-label={`${caveats.Noun} name`}
+      <div className="space-y-3">
+        <form onSubmit={openQueue} className="flex gap-2">
+          <input
+            className={`${inputClass} mt-0`}
+            value={queueInput}
+            onChange={(event) => setQueueInput(event.target.value)}
+            placeholder={caveats.namePlaceholder}
+            aria-label={`${caveats.Noun} name`}
+          />
+          <button type="submit" className={buttonClass}>
+            Go
+          </button>
+          <button
+            type="button"
+            className={`${secondaryButtonClass} whitespace-nowrap`}
+            onClick={() => setPickerOpen(true)}
+          >
+            Browse…
+          </button>
+        </form>
+
+        <RecentDestinations
+          connectionId={connectionId}
+          activeName={activeQueue}
+          onOpen={(name) => {
+            setQueueInput(name)
+            setSearchParams({ queue: name })
+          }}
         />
-        <button type="submit" className={buttonClass}>
-          Go
-        </button>
-      </form>
+      </div>
 
       {!hasQueue && (
         <EmptyState title={`Choose a ${caveats.noun}`} body={caveats.chooseNote} />
@@ -242,6 +283,21 @@ export default function QueueExplorerPage() {
           </div>
         </>
       )}
+
+      <DestinationPicker
+        open={pickerOpen}
+        connectionId={connectionId}
+        caveat={caveats}
+        onPick={(entry) => {
+          // Remember what the broker called it, so the recorded row carries a real kind rather than
+          // the one derived from the provider.
+          pickedKind.current.set(entry.name, entry.kind)
+          setQueueInput(entry.name)
+          setSearchParams({ queue: entry.name })
+          setPickerOpen(false)
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
 
       <ConfirmDialog
         open={confirmPurge}

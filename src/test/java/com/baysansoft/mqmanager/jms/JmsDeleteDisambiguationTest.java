@@ -25,6 +25,9 @@ import com.baysansoft.mqmanager.config.MqManagerProperties;
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
+import com.baysansoft.mqmanager.jms.provider.ActiveMqClassicDestinationLister;
+import com.baysansoft.mqmanager.jms.provider.ArtemisDestinationLister;
+import com.baysansoft.mqmanager.jms.provider.IbmMqDestinationLister;
 import com.baysansoft.mqmanager.jms.provider.IbmMqDiagnostics;
 import com.baysansoft.mqmanager.web.MqOperationException;
 
@@ -70,12 +73,20 @@ class JmsDeleteDisambiguationTest {
         when(session.createBrowser(any())).thenReturn(browser);
 
         ConnectionFactoryBuilder builder = new StubBuilder(factory);
+        StubRegistry registry = new StubRegistry(builder);
+        MqManagerProperties properties = new MqManagerProperties();
         messaging = new JmsMessagingOperations(
-                new StubRegistry(builder),
+                registry,
+                // The delete path never lists, so the real listers are wired in only to satisfy the
+                // registry's "every JMS provider must have one" check.
+                new DestinationListerRegistry(List.of(
+                        new ActiveMqClassicDestinationLister(registry, properties),
+                        new ArtemisDestinationLister(registry, properties),
+                        new IbmMqDestinationLister(properties))),
                 p -> null,
                 new JmsErrorTranslator(new IbmMqDiagnostics()),
                 new MessageMapper(),
-                new MqManagerProperties());
+                properties);
 
         profile = new ConnectionProfile();
         profile.setName("stub");
@@ -141,8 +152,13 @@ class JmsDeleteDisambiguationTest {
     void reportsNotLocatableWhenTheBrowseWasTruncated() throws Exception {
         MqManagerProperties properties = new MqManagerProperties();
         properties.getDelete().setDisambiguationLimit(3);
+        StubRegistry registry = new StubRegistry(new StubBuilder(factoryReturning()));
         messaging = new JmsMessagingOperations(
-                new StubRegistry(new StubBuilder(factoryReturning())),
+                registry,
+                new DestinationListerRegistry(List.of(
+                        new ActiveMqClassicDestinationLister(registry, properties),
+                        new ArtemisDestinationLister(registry, properties),
+                        new IbmMqDestinationLister(properties))),
                 p -> null,
                 new JmsErrorTranslator(new IbmMqDiagnostics()),
                 new MessageMapper(),

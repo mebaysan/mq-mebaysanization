@@ -28,6 +28,7 @@ public class MqManagerProperties {
     private Purge purge = new Purge();
     private Depth depth = new Depth();
     private Delete delete = new Delete();
+    private Destinations destinations = new Destinations();
     private Kafka kafka = new Kafka();
     private Logs logs = new Logs();
 
@@ -220,6 +221,95 @@ public class MqManagerProperties {
         }
     }
 
+    /**
+     * Listing what is on a broker. Every provider answers a different way and every one of those ways
+     * can be switched off, so the bounds here are about not hanging an HTTP request while a broker
+     * declines to reply.
+     */
+    public static class Destinations {
+        private int defaultLimit = 500;
+        private int maxLimit = 2_000;
+        /** Overall wall-clock budget for one listing, on every provider. A human is waiting. */
+        private Duration timeout = Duration.ofSeconds(5);
+        /**
+         * ActiveMQ Classic only. Advisory messages arrive asynchronously with no completion signal, so
+         * the scan waits for the count to stop growing and gives up here.
+         */
+        private Duration advisorySettle = Duration.ofMillis(1_500);
+        /** ActiveMQ Classic only. How long between two "has the count stopped growing?" checks. */
+        private Duration advisoryQuietPeriod = Duration.ofMillis(250);
+        /** Artemis only. Brokers may rename the management address. */
+        private String managementAddress = "activemq.management";
+        /** IBM MQ only. How long PCF waits for the command server's reply. */
+        private Duration commandWait = Duration.ofSeconds(5);
+        /** How many remembered destinations are kept per connection before the oldest are evicted. */
+        private int savedPerConnection = 50;
+
+        public int getDefaultLimit() {
+            return defaultLimit;
+        }
+
+        public void setDefaultLimit(int defaultLimit) {
+            this.defaultLimit = defaultLimit;
+        }
+
+        public int getMaxLimit() {
+            return maxLimit;
+        }
+
+        public void setMaxLimit(int maxLimit) {
+            this.maxLimit = maxLimit;
+        }
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            this.timeout = timeout;
+        }
+
+        public Duration getAdvisorySettle() {
+            return advisorySettle;
+        }
+
+        public void setAdvisorySettle(Duration advisorySettle) {
+            this.advisorySettle = advisorySettle;
+        }
+
+        public Duration getAdvisoryQuietPeriod() {
+            return advisoryQuietPeriod;
+        }
+
+        public void setAdvisoryQuietPeriod(Duration advisoryQuietPeriod) {
+            this.advisoryQuietPeriod = advisoryQuietPeriod;
+        }
+
+        public String getManagementAddress() {
+            return managementAddress;
+        }
+
+        public void setManagementAddress(String managementAddress) {
+            this.managementAddress = managementAddress;
+        }
+
+        public Duration getCommandWait() {
+            return commandWait;
+        }
+
+        public void setCommandWait(Duration commandWait) {
+            this.commandWait = commandWait;
+        }
+
+        public int getSavedPerConnection() {
+            return savedPerConnection;
+        }
+
+        public void setSavedPerConnection(int savedPerConnection) {
+            this.savedPerConnection = savedPerConnection;
+        }
+    }
+
     public static class Delete {
         private Duration receiveTimeout = Duration.ofSeconds(5);
         /** Bounds the browse that distinguishes "not on the queue" from "cannot be reached". */
@@ -312,5 +402,13 @@ public class MqManagerProperties {
 
     public void setDelete(Delete delete) {
         this.delete = delete;
+    }
+
+    public Destinations getDestinations() {
+        return destinations;
+    }
+
+    public void setDestinations(Destinations destinations) {
+        this.destinations = destinations;
     }
 }

@@ -12,8 +12,12 @@ export const queryKeys = {
     ['connections', id, 'queue', queueName, 'depth'] as const,
   message: (id: number, queueName: string, messageId: string) =>
     ['connections', id, 'queue', queueName, 'message', messageId] as const,
+  /** Under the connection prefix, so deleting a connection clears its listing too. */
+  destinations: (id: number, kind: string, prefix: string) =>
+    ['connections', id, 'destinations', kind, prefix] as const,
+  savedDestinations: (id: number) => ['connections', id, 'saved-destinations'] as const,
   /** Prefix, so clearing the buffer invalidates every filter combination at once. */
   logsRoot: () => ['logs'] as const,
-  logs: (level: string, query: string, limit: number) =>
-    ['logs', level, query, limit] as const,
+  logs: (level: string, query: string, from: string, to: string, sort: string, limit: number) =>
+    ['logs', level, query, from, to, sort, limit] as const,
 }

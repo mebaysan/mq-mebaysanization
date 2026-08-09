@@ -211,9 +211,20 @@
     </dependencies>
 
     <build>
-        <!-- Produces target/mq-mebaysanization.jar so the run command is exactly `java -jar target/mq-mebaysanization.jar`. -->
-        <finalName>mq-mebaysanization</finalName>
+        <!--
+          No <finalName>. Maven's default is already ${project.artifactId}-${project.version}, so the
+          fat JAR is target/mq-mebaysanization-<version>.jar and an archived or downloaded copy says
+          what it is without anyone having to rename it. Setting finalName to that same expression
+          would be one more thing to drift; leaving it out cannot.
 
+          spring-boot:repackage rewrites that jar IN PLACE and leaves the pre-repackage one beside it
+          as <name>.jar.original, which no *.jar glob matches - scripts/verify-portability.sh relies
+          on exactly that to resolve the runnable jar from disk.
+
+          Downstream of this: verify-portability.sh globs for it, README.md's run command uses a glob,
+          and .github/workflows/release.yml no longer stamps a versioned copy because `mvn package`
+          already produced one.
+        -->
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

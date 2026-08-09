@@ -26,7 +26,10 @@ public final class LocalBrokerLauncher {
         broker.setBrokerName("mqm-local");
         broker.setPersistent(false);
         broker.setUseJmx(false);
-        broker.setAdvisorySupport(false);
+        // Advisories ON, unlike the test broker. This one exists to drive the UI by hand, and Browse…
+        // reads destinations off the advisory topics — with them off it would only ever demonstrate the
+        // "this broker will not say" path.
+        broker.setAdvisorySupport(true);
         broker.addConnector("tcp://127.0.0.1:" + port);
         broker.start();
         broker.waitUntilStarted();

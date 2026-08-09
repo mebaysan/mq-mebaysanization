@@ -3,6 +3,7 @@ package com.baysansoft.mqmanager.logs;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
@@ -72,30 +73,73 @@ public class LogBuffer {
     }
 
     /**
-     * The most recent matching lines, newest first — a log tail is read from the top, and putting the
-     * newest line there means the interesting one is visible without scrolling.
+     * The most recent matching lines in a time window.
+     *
+     * <p><strong>Always the newest {@code limit} matches, whatever {@code order} is.</strong> The order
+     * decides only how they are handed back. "The first N ascending" would be the <em>oldest</em> N,
+     * which on a full buffer means showing startup and hiding what just happened — the opposite of what
+     * a tail is for. It also keeps the descending scan's early stop: ascending is a reverse of a list
+     * that is at most {@code limit} long, so O(limit) rather than O(capacity).
+     *
+     * <p>Because an ascending page therefore starts partway through the window, {@link Snapshot#windowTruncated}
+     * says so. Without it a list beginning at 10:03:11 would imply nothing matched before then.
      *
      * @param minimum only lines at least this severe
      * @param query   case-insensitive substring over the message and the logger name; blank matches all
+     * @param from    inclusive lower bound on the timestamp, or null for no lower bound
+     * @param to      inclusive upper bound on the timestamp, or null for no upper bound
      */
-    public synchronized Snapshot recent(LogLevel minimum, String query, int limit) {
+    public synchronized Snapshot recent(LogLevel minimum, String query, Instant from, Instant to,
+            SortOrder order, int limit) {
         String needle = StringUtils.hasText(query) ? query.trim().toLowerCase(Locale.ROOT) : null;
         List<LogEntry> matched = new ArrayList<>(Math.min(limit, entries.size()));
+        boolean windowTruncated = false;
 
         // Descending, so the scan stops as soon as the limit is reached rather than after walking the
         // whole buffer and throwing most of it away.
-        for (var iterator = entries.descendingIterator(); iterator.hasNext() && matched.size() < limit;) {
+        //
+        // The window is FILTERED, not seeked: there is deliberately no early break when the walk
+        // crosses `from`. Entries are ordered by insertion, and two threads logging in the same
+        // millisecond can put a marginally older timestamp after a newer one, so stopping at the first
+        // out-of-window line could drop a straggler. The scan is bounded by capacity either way.
+        for (var iterator = entries.descendingIterator(); iterator.hasNext();) {
+            if (matched.size() >= limit) {
+                // Older lines remain inside the window. They may or may not have matched, so this can
+                // over-report — the safe direction, exactly as BrowseResult.truncated is. Being exact
+                // would mean scanning the rest of the buffer for one more match, which is a lot of work
+                // for a flag whose whole job is to say "this may not be everything".
+                windowTruncated = true;
+                break;
+            }
             LogEntry entry = iterator.next();
-            if (entry.level().atLeast(minimum) && matches(entry, needle)) {
+            if (entry.level().atLeast(minimum) && inWindow(entry, from, to) && matches(entry, needle)) {
                 matched.add(entry);
             }
         }
-        return new Snapshot(matched, entries.size(), capacity, dropped);
+
+        if (order == SortOrder.OLDEST_FIRST) {
+            Collections.reverse(matched);
+        }
+        return new Snapshot(matched, entries.size(), capacity, dropped, windowTruncated, order);
+    }
+
+    /** The unbounded, newest-first read. Kept because most callers want exactly that. */
+    public synchronized Snapshot recent(LogLevel minimum, String query, int limit) {
+        return recent(minimum, query, null, null, SortOrder.NEWEST_FIRST, limit);
     }
 
     public synchronized void clear() {
         entries.clear();
         dropped = 0;
+    }
+
+    private static boolean inWindow(LogEntry entry, Instant from, Instant to) {
+        Instant at = entry.timestamp();
+        if (at == null) {
+            // An undated line cannot be placed, so it is never silently swept into a window.
+            return from == null && to == null;
+        }
+        return (from == null || !at.isBefore(from)) && (to == null || !at.isAfter(to));
     }
 
     private static boolean matches(LogEntry entry, String needle) {
@@ -118,9 +162,15 @@ public class LogBuffer {
     }
 
     /**
-     * @param held    lines currently in the buffer, matched or not
-     * @param dropped lines evicted since startup. Non-zero means the page is not showing everything
+     * @param held            lines currently in the buffer, matched or not
+     * @param dropped         lines evicted since startup. Non-zero means the page is not showing everything
+     * @param windowTruncated true when the limit stopped the scan while older lines remained inside the
+     *                        window. Under OLDEST_FIRST this is the difference between "nothing happened
+     *                        before the first line shown" and "we stopped looking there"
+     * @param order           echoed back, so a client describes the answer it got rather than the
+     *                        request it made
      */
-    public record Snapshot(List<LogEntry> entries, int held, int capacity, long dropped) {
+    public record Snapshot(List<LogEntry> entries, int held, int capacity, long dropped,
+            boolean windowTruncated, SortOrder order) {
     }
 }

@@ -113,4 +113,87 @@ class LogControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.entries.length()").value(3));
     }
+
+    // ------------------------------------------------------------------ time range and sort
+
+    @Test
+    @DisplayName("a time range narrows the view, at both ends")
+    void timeRangeNarrowsTheView() throws Exception {
+        buffer.clear();
+        buffer.add(Instant.parse("2026-08-09T10:00:00Z"), LogLevel.INFO, "c.b.m.Test", "main",
+                "before", null);
+        buffer.add(Instant.parse("2026-08-09T10:00:05Z"), LogLevel.INFO, "c.b.m.Test", "main",
+                "inside", null);
+        buffer.add(Instant.parse("2026-08-09T10:00:20Z"), LogLevel.INFO, "c.b.m.Test", "main",
+                "after", null);
+
+        mockMvc.perform(get("/api/logs")
+                        .param("from", "2026-08-09T10:00:01Z")
+                        .param("to", "2026-08-09T10:00:10Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries.length()").value(1))
+                .andExpect(jsonPath("$.entries[0].message").value("inside"));
+    }
+
+    @Test
+    @DisplayName("an explicit offset is accepted, not only a Z instant")
+    void offsetFormsAreAccepted() throws Exception {
+        mockMvc.perform(get("/api/logs")
+                        .param("level", "TRACE")
+                        .param("from", "1970-01-01T01:00:00+01:00"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries.length()").value(3));
+    }
+
+    @Test
+    @DisplayName("sort changes the order and is echoed back, case-insensitively")
+    void sortChangesOrderOnly() throws Exception {
+        mockMvc.perform(get("/api/logs").param("level", "TRACE").param("sort", "oldest_first"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order").value("OLDEST_FIRST"))
+                .andExpect(jsonPath("$.entries[0].message").value("a debug line"))
+                .andExpect(jsonPath("$.entries[2].message").value("it broke"));
+    }
+
+    @Test
+    @DisplayName("a limit returns the newest lines whichever way they are sorted")
+    void limitAlwaysTakesTheNewest() throws Exception {
+        mockMvc.perform(get("/api/logs")
+                        .param("level", "TRACE").param("sort", "OLDEST_FIRST").param("limit", "2"))
+                .andExpect(status().isOk())
+                // Not "a debug line" and "Purged 3 records" — those are the OLDEST two.
+                .andExpect(jsonPath("$.entries[0].message").value("Purged 3 records"))
+                .andExpect(jsonPath("$.entries[1].message").value("it broke"))
+                .andExpect(jsonPath("$.windowTruncated").value(true));
+    }
+
+    @Test
+    @DisplayName("an unparseable timestamp is a 400 that names the format")
+    void badTimestampIsRejected() throws Exception {
+        mockMvc.perform(get("/api/logs").param("from", "yesterday"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("ISO-8601")));
+    }
+
+    @Test
+    @DisplayName("an unknown sort order is a 400 that names both valid ones")
+    void badSortIsRejected() throws Exception {
+        mockMvc.perform(get("/api/logs").param("sort", "sideways"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("NEWEST_FIRST")));
+    }
+
+    @Test
+    @DisplayName("a range that runs backwards is refused rather than silently returning nothing")
+    void reversedRangeIsRejected() throws Exception {
+        mockMvc.perform(get("/api/logs")
+                        .param("from", "2026-08-09T10:00:00Z")
+                        .param("to", "2026-08-09T09:00:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
 }

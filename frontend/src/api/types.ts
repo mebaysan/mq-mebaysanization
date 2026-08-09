@@ -43,6 +43,48 @@ export interface ConnectionTestResult {
   durationMs: number
 }
 
+export type DestinationKind = 'QUEUE' | 'TOPIC' | 'UNKNOWN'
+
+/**
+ * How much of a destination listing to trust.
+ *
+ * An empty `destinations` array means "there is genuinely nothing here" ONLY when this is `COMPLETE`.
+ * `UNAVAILABLE` always carries an empty array, so branch on this before you look at the array.
+ */
+export type DestinationAvailability = 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE'
+
+export interface DestinationEntry {
+  name: string
+  kind: DestinationKind
+  /** A name the broker owns rather than the user: SYSTEM.*, __consumer_offsets, and so on. */
+  internal: boolean
+}
+
+export interface DestinationListing {
+  destinations: DestinationEntry[]
+  returned: number
+  limit: number
+  /** True when OUR cap cut the list, never when the broker stopped short. */
+  truncated: boolean
+  availability: DestinationAvailability
+  /** A stable `DESTINATION_LIST_*` code. A body code on a 200, not an ApiError code. */
+  reason: string | null
+  /** Plain-language name of the mechanism used, e.g. "advisory topics". */
+  source: string
+  message: string
+  note: string | null
+}
+
+/** A destination this instance has opened before, remembered server-side next to the connection. */
+export interface SavedDestination {
+  name: string
+  kind: DestinationKind
+  pinned: boolean
+  openCount: number
+  lastOpenedAt: string
+  createdAt: string
+}
+
 export interface QueueMessage {
   messageId: string
   correlationId: string | null
@@ -104,6 +146,12 @@ export interface LogEntry {
   stackTrace: string | null
 }
 
+/**
+ * Presentation order only. A limited read always returns the most recent matching lines, so
+ * `OLDEST_FIRST` reverses the page rather than choosing a different one.
+ */
+export type LogSort = 'NEWEST_FIRST' | 'OLDEST_FIRST'
+
 /** A read of the in-memory ring buffer behind the monitoring page. */
 export interface LogSnapshot {
   entries: LogEntry[]
@@ -112,6 +160,10 @@ export interface LogSnapshot {
   capacity: number
   /** Lines evicted since startup. Non-zero means the history shown is incomplete. */
   dropped: number
+  /** The limit stopped the scan while older lines remained inside the requested range. */
+  windowTruncated: boolean
+  /** Echoed back, so the footer describes the answer rather than the request. */
+  order: LogSort
 }
 
 /** The single error shape every endpoint uses. */

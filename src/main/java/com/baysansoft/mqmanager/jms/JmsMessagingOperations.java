@@ -21,6 +21,8 @@ import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.ConnectionTestResult;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
+import com.baysansoft.mqmanager.messaging.model.DestinationListing;
+import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 import com.baysansoft.mqmanager.web.MqOperationException;
@@ -56,17 +58,20 @@ public class JmsMessagingOperations implements ProviderMessagingOperations {
     private static final Logger log = LoggerFactory.getLogger(JmsMessagingOperations.class);
 
     private final ConnectionFactoryRegistry registry;
+    private final DestinationListerRegistry listers;
     private final BrokerPasswordResolver passwordResolver;
     private final JmsErrorTranslator errorTranslator;
     private final MessageMapper messageMapper;
     private final MqManagerProperties properties;
 
     public JmsMessagingOperations(ConnectionFactoryRegistry registry,
+                                  DestinationListerRegistry listers,
                                   BrokerPasswordResolver passwordResolver,
                                   JmsErrorTranslator errorTranslator,
                                   MessageMapper messageMapper,
                                   MqManagerProperties properties) {
         this.registry = registry;
+        this.listers = listers;
         this.passwordResolver = passwordResolver;
         this.errorTranslator = errorTranslator;
         this.messageMapper = messageMapper;
@@ -130,6 +135,41 @@ public class JmsMessagingOperations implements ProviderMessagingOperations {
                 return message.getJMSMessageID();
             }
         });
+    }
+
+    /**
+     * Delegates to the provider's {@link DestinationLister}, which is the second provider-specific
+     * seam and the reason this method still does not branch on {@link Provider}.
+     *
+     * <p>The exception handling is the whole contract in three lines: anything a lister throws is a
+     * broker that could not be reached, so it is translated into the standard error response. A broker
+     * that answered but declined has already returned a listing saying so, and never arrives here.
+     */
+    @Override
+    public DestinationListing listDestinations(ConnectionProfile profile, DestinationQuery query) {
+        MqManagerProperties.Destinations settings = properties.getDestinations();
+        DestinationListRequest request = new DestinationListRequest(
+                profile,
+                passwordResolver.resolve(profile),
+                query.kind(),
+                query.prefix(),
+                clampDestinationLimit(query.limit()),
+                settings.getTimeout());
+        try {
+            return listers.forProvider(profile.getProvider()).list(request);
+        } catch (MqOperationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw errorTranslator.translate(e, profile, "list destinations");
+        }
+    }
+
+    private int clampDestinationLimit(int requested) {
+        MqManagerProperties.Destinations settings = properties.getDestinations();
+        if (requested <= 0) {
+            return settings.getDefaultLimit();
+        }
+        return Math.min(requested, settings.getMaxLimit());
     }
 
     @Override

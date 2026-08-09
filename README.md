@@ -1,9 +1,10 @@
 # MQ mebaysanization
 
 One web UI for operating message queues on **Apache ActiveMQ Classic**, **Apache ActiveMQ Artemis**,
-**IBM MQ** and **Apache Kafka**. Pick a provider, save the connection details, then send messages,
-browse a queue, inspect or delete a single message, purge, and read the depth — the same screens and the
-same REST API whichever broker is behind them.
+**IBM MQ** and **Apache Kafka**. Pick a provider, save the connection details, then list what is on the
+broker, send messages, browse a queue, inspect or delete a single message, purge, and read the depth —
+the same screens and the same REST API whichever broker is behind them. Destinations you open are
+remembered, so getting back to one is a click.
 
 Three of the four speak JMS. Kafka does not, and this tool does not pretend it does: where its model
 genuinely differs — a topic instead of a queue, a depth that counts retained records rather than a
@@ -16,9 +17,12 @@ client installation.
 
 ```bash
 mvn clean package
-java -jar target/mq-mebaysanization.jar
+java -jar target/mq-mebaysanization-*.jar
 # then open http://localhost:8080
 ```
+
+The JAR carries its version in the filename — `mq-mebaysanization-1.0.2.jar` — so an archived or
+downloaded copy says what it is without anyone having to rename it.
 
 ---
 
@@ -67,10 +71,16 @@ All settings are environment variables with sensible defaults.
 | `MQMANAGER_ENCRYPTION_KEY` | *(generated)* | Base64-encoded 32-byte AES key. When unset, one is generated into the data directory on first run |
 | `MQMANAGER_LOG_PAYLOADS` | `true` | Permits message bodies to be written to the log at DEBUG. **Enabled**, so the only thing keeping bodies out of the log is the log level. Set it to `false` to keep them out whatever the level |
 
+Everything else is tuned in `application.yml` rather than by environment variable, because it is
+rarely touched: `mqmanager.browse.*`, `purge.*`, `depth.*`, `delete.*`, `kafka.*`, `logs.*`, and
+`mqmanager.destinations.*` (the limits, timeouts and per-provider knobs behind
+[Discovering destinations](#discovering-destinations), plus `saved-per-connection`). Each is commented
+in place with why it is set where it is.
+
 The data directory ends up holding:
 
 ```
-data/mqmanager.mv.db    the H2 database with your saved connection profiles
+data/mqmanager.mv.db    the H2 database with your saved connection profiles and remembered destinations
 data/encryption.key     the AES key protecting stored broker passwords (mode 0600 where supported)
 ```
 
@@ -129,6 +139,45 @@ selects plain `PLAINTEXT`. `SASL_SSL`, SCRAM, OAUTHBEARER and mTLS are out of sc
 
 These are real differences between the brokers, not quirks of this tool. The UI surfaces each one rather
 than pretending the three are identical.
+
+### Discovering destinations
+
+**Browse…** on the queue page asks the broker what it has. Every provider answers a different way, and
+every one of those ways can be switched off by whoever runs the broker.
+
+| Provider | How it is asked | What stops it answering | Is an empty answer trustworthy? |
+|---|---|---|---|
+| ActiveMQ Classic | Advisory topics, over the connection already open | `advisorySupport=false` on the broker | **No.** Nothing arriving and nothing existing are identical from a client, so an empty result is reported as *could not list* |
+| Artemis | A management request to `activemq.management` | The management address disabled, or no permission to send to it | Yes — a successful reply that is empty means empty |
+| IBM MQ | PCF, through `SYSTEM.ADMIN.COMMAND.QUEUE` | The command server stopped (`START CMDSERV`), or no `+dsp` on the queue manager | Yes |
+| Kafka | `Admin.listTopics` | The cluster ACL withholding Describe on the cluster | Yes |
+
+A broker that will not answer is **not an error**. The request succeeds with `availability` set to
+`UNAVAILABLE`, a `reason` code and a sentence saying which of the above happened — the connection is
+fine, and broker policy is a legitimate answer to "what have you got?". The picker shows that instead of
+a list, and typing a name keeps working. The three states are `COMPLETE`, `PARTIAL` (part of the listing
+came back — on Artemis and IBM MQ the queues and the topics are two separate calls, and one can be
+refused while the other succeeds) and `UNAVAILABLE`.
+
+Names the broker owns rather than the user — `SYSTEM.*` on IBM MQ, `__consumer_offsets` on Kafka,
+`activemq.notifications` on Artemis — are flagged `internal` and hidden behind a toggle. On Kafka the
+flag is the broker's own `isInternal()`, not a guess from the name.
+
+**There is deliberately no depth column.** IBM MQ could answer it in one `INQUIRE_Q` and Kafka in one
+`endOffsets` sweep, but the three JMS providers have no cheap count — it would mean a browse-and-count
+*per queue*, turning one click into thousands of round trips. A number that is exact on two providers,
+ruinous on one and absent on another means different things depending on the broker, which is exactly
+what the rest of this tool refuses to do. Open a destination to see its depth.
+
+JMX was considered for ActiveMQ Classic and rejected. It would give depths too, but it needs a JMX/RMI
+port that is usually closed, a second set of credentials, and RMI is a deserialization attack surface in
+a build with no authentication. Advisories ride the connection this tool already has.
+
+Destinations you open are remembered per connection — pinned ones first, then most recent — and they
+keep working on a broker that refuses to be listed. They are stored in the database beside the
+connection, so they survive a different browser or machine, and they are deleted with the connection.
+The list is capped at `mqmanager.destinations.saved-per-connection` (50), evicting the oldest unpinned
+entries; pinned ones are never evicted, so that cap is soft.
 
 ### Browsing is not always complete
 
@@ -269,10 +318,13 @@ Runs with **no Docker, no brokers running, and no network** — the frontend bui
   — and Gate 2a below scans the whole dependency tree regardless of scope, so it would fail. It also
   drags Scala, `kafka-streams` → `rocksdbjni`, log4j-core and JUnit 4 onto the test classpath for one
   test. See the Kafka checklist below for what is covered manually instead.
-- `ImportGuardTest` fails the build on three mistakes that otherwise compile cleanly: importing either
-  `ActiveMQConnectionFactory` (Classic and Artemis ship classes with the same simple name), importing
-  `react-router-dom` (removed in React Router 8), and letting `org.apache.kafka` leak outside the
-  `kafka` package or `jakarta.jms` leak into it.
+- `ImportGuardTest` fails the build on four mistakes that otherwise compile cleanly: importing any class
+  whose simple name exists twice on this classpath (`ActiveMQConnectionFactory`, `ActiveMQConnection`,
+  `ActiveMQDestination`, `ActiveMQQueue`, `ActiveMQTopic` — Classic against Artemis — and
+  `MQQueueManager`, `com.ibm.mq` against the compat layer inside the Jakarta client); importing
+  `react-router-dom` (removed in React Router 8); letting `org.apache.kafka` leak outside the `kafka`
+  package or `jakarta.jms` leak into it; and letting `com.ibm.mq.headers` (PCF) escape
+  `jms/provider`, where the one lister that speaks it lives.
 
 ### Portability gate
 
@@ -347,6 +399,13 @@ user `app`, password `passw0rd`, and use queue `DEV.QUEUE.1`.
    Note that IBM MQ reports "wrong password" and "authenticated but not permitted" with the *same*
    reason code, so this tool cannot tell them apart the way it can on Kafka, where they are 401 and 403
    respectively. If that distinction matters to you, the queue manager's own AMQERR logs have it.
+10. **Browse… lists the queue manager's objects.** `DEV.QUEUE.1` is there, `SYSTEM.*` objects appear
+    only with **Show internal** on, and a prefix of `DEV.` narrows it. This is the one code path in the
+    project that cannot be integration-tested — PCF needs a real queue manager — so it is the step
+    worth doing by hand.
+11. `echo "STOP CMDSERV" | runmqsc QM1`, then Browse… again → an amber panel reading
+    `DESTINATION_LIST_TIMED_OUT`, **HTTP 200 rather than an error**, and typing `DEV.QUEUE.1` still
+    works. `START CMDSERV` restores it.
 
 ### Kafka manual-test checklist
 
@@ -386,6 +445,10 @@ auto-creates).
     `max.block.ms` alone would hold the request for a minute.
 12. Send to a topic whose records are snappy- or zstd-compressed and browse them back. This exercises the
     bundled native codecs on your platform — see the portability note above.
+13. **Browse… lists every topic**, all of them badged `TOPIC`. `__consumer_offsets` appears only with
+    **Show internal** on, and it is flagged because the broker says it is internal, not because of its
+    name. Open one from the list, then reload the page: it is in the remembered row underneath the name
+    box.
 
 ### A manual check worth doing for the Apache brokers too
 
@@ -397,8 +460,23 @@ Do one manual pass against an ActiveMQ or Artemis broker with authentication **o
 ## The Logs page
 
 `/logs` shows this process's own recent log lines — a live view for watching an operation as it
-happens, with a severity filter, a text search over the message and logger, and expandable stack
-traces.
+happens, with a severity filter, a text search over the message and logger, a time range, a sortable
+timestamp column, and expandable stack traces.
+
+**The time range is in local time**, entered as two `datetime-local` fields with quick presets, and sent
+to the server as absolute ISO-8601 instants. It has to be: a wall-clock string carries no zone, and the
+server's zone is not necessarily the reader's, so guessing would shift the window by hours. Both bounds
+are inclusive, and the upper one includes the whole second it names. Setting an end time disables
+**Live** — no new line can enter a range that has already closed, so polling would only redraw an
+identical list while implying otherwise.
+
+**A limit always returns the most recent matching lines.** Sorting oldest-first changes the order they
+are shown in, not which ones you get. The alternative — "the first N ascending" — would return the
+*oldest* N of a 2000-line buffer, showing startup output and hiding everything that just happened, which
+is the opposite of what a tail is for. It also keeps the scan cheap: the buffer is walked newest-first
+and stops at the limit either way. When the limit did cut a page short with older lines still inside the
+range, the footer says so (`windowTruncated` in the response) — without that, an oldest-first page
+starting at 10:03:11 would read as "nothing happened before then".
 
 It reads an **in-memory ring buffer**, not a file. The application logs to stdout, and where that ends
 up depends entirely on how it was launched, so a bounded buffer gives the page something to read
@@ -457,8 +535,22 @@ name and a dotted path segment would be treated as a static file request.
 | `DELETE` | `/api/connections/{id}/queue/messages?queueName=&messageId=` |
 | `DELETE` | `/api/connections/{id}/queue/purge?queueName=` |
 | `GET` | `/api/connections/{id}/queue/depth?queueName=` |
-| `GET` | `/api/logs?level=&q=&limit=` |
+| `GET` | `/api/connections/{id}/destinations?kind=&prefix=&limit=` |
+| `GET` | `/api/connections/{id}/saved-destinations` |
+| `POST` | `/api/connections/{id}/saved-destinations` *(records an open; upsert by name)* |
+| `PUT` | `/api/connections/{id}/saved-destinations/pin` |
+| `DELETE` | `/api/connections/{id}/saved-destinations?name=` |
+| `GET` | `/api/logs?level=&q=&from=&to=&sort=&limit=` |
 | `DELETE` | `/api/logs` *(empties the in-memory buffer; stdout is untouched)* |
+
+On `/api/logs`, `from` and `to` are **absolute ISO-8601 instants** (`2026-08-09T14:03:11Z` or
+`2026-08-09T15:03:11+01:00`), both inclusive; anything else is a 400 naming the format. `sort` is
+`NEWEST_FIRST` (default) or `OLDEST_FIRST` and changes only the order — see
+[The Logs page](#the-logs-page).
+
+`prefix` on `/destinations` is a **name prefix, not a substring**, on every provider: IBM MQ pushes it
+down to the queue manager as `prefix*` and the others apply it after the fact. Substring search is a
+client-side thing the picker does over the page it already has, and it says so.
 
 On `PUT`, omitting `password` keeps the stored one and sending `""` clears it — the current value is
 never sent to the client, so an unchanged edit form has nothing to resubmit.
@@ -468,6 +560,19 @@ partition — and the JMS providers reject a non-null one rather than dropping i
 
 Errors always come back as `{"status", "error", "message"}`, plus a stable machine-readable `code`
 (`BROKER_AUTH_FAILED`, `QUEUE_NOT_FOUND`, `MESSAGE_UNREACHABLE`, …). Stack traces are never returned.
+
+`GET /destinations` has one more state to report, and it does so **inside a 200 body** rather than as an
+error: a broker that cannot be reached is an error, but a broker that answered and declined is not.
+These are `reason` values on a successful response, not `ApiError` codes, and they appear only when
+`availability` is not `COMPLETE`:
+
+| `reason` | Meaning |
+|---|---|
+| `DESTINATION_LIST_NOT_PERMITTED` | Connected, but this user may not ask. Kafka Describe ACL, Artemis management permission, IBM MQ `+dsp` |
+| `DESTINATION_LIST_NOT_AVAILABLE` | The mechanism is not there — no `SYSTEM.ADMIN.COMMAND.QUEUE`, no management address, or a command the queue manager refused |
+| `DESTINATION_LIST_TIMED_OUT` | No answer in the budget. On IBM MQ this almost always means the command server is stopped |
+| `DESTINATION_LIST_CAPPED` | Our own `limit` cut the list. `truncated` is true; narrow it with `prefix` |
+| `DESTINATION_LIST_INDISTINGUISHABLE` | ActiveMQ Classic only: no advisories arrived, which looks the same as a broker with no destinations |
 
 Kafka adds a few codes of its own, all in the same shape:
 
@@ -493,10 +598,11 @@ JAR's size.
 
 ## Not in this version
 
-Login/authentication · TLS to brokers · discovering queue names from the broker (JMX/PCF) · creating or
-deleting queue definitions · connection pooling · dead-letter queue browsing · message replay or editing
-(JMS messages are immutable once enqueued; editing would have to be delete-then-resend) · a Docker image
-· multi-user access control or an audit trail.
+Login/authentication · TLS to brokers · a depth or message count in the destination listing (see
+[Discovering destinations](#discovering-destinations) for why) · creating or deleting queue definitions ·
+connection pooling · dead-letter queue browsing · message replay or editing (JMS messages are immutable
+once enqueued; editing would have to be delete-then-resend) · a Docker image · multi-user access control
+or an audit trail.
 
 Kafka specifically: `SASL_SSL`, SCRAM, OAUTHBEARER and mTLS · consumer-group inspection, lag or offset
 reset · choosing a partition explicitly when sending · reading from a given offset or from the tail
@@ -508,7 +614,12 @@ deleting topics.
 - One instance per data directory. H2 opens its file exclusively, so a second instance pointed at the
   same `./data` fails at startup with *"Database may be already in use"*. Point it elsewhere with
   `MQMANAGER_DATA_DIR`.
-- Queue names are typed, not discovered.
+- Destinations can be listed from the broker, but not from *every* broker. An ActiveMQ Classic broker
+  with advisories off, an Artemis broker that denies its management address, an IBM MQ queue manager
+  with no command server, and a Kafka cluster that withholds Describe all answer "cannot tell you"
+  rather than a list. **Typing a name always works**, on every provider, in every one of those cases.
+- Remembered destinations live in the database next to the connection, not in the browser. They are
+  bookmarks, not an audit trail — this build has no users to attribute anything to.
 - Messages are treated as text.
 - A browse is a point-in-time snapshot, not a live view.
 
@@ -531,6 +642,24 @@ transports are excluded on purpose so the JAR stays portable; Artemis falls back
 **A Kafka topic reads as empty when you know it is not** — either every record has aged out of the
 retention window, or the cluster does not create topics on demand and the name is wrong. Both look the
 same from outside; `kafka-topics.sh --list` tells them apart.
+
+**Browse… says it could not list, on ActiveMQ Classic** — the broker is running with
+`advisorySupport=false`. That is the only way it publishes what it has, so nothing arrives and the tool
+refuses to guess between "off" and "empty". Either turn advisories on, or type the name.
+
+**Browse… says it is not permitted, on IBM MQ** — the queue manager needs its command server running
+(`START CMDSERV` in `runmqsc`) and the connecting user needs `+dsp` on the queue manager plus put
+authority on `SYSTEM.ADMIN.COMMAND.QUEUE`. A stopped command server shows up as a timeout rather than a
+refusal, because nothing answers at all.
+
+**Browse… times out on Artemis** — the broker's management address is disabled, renamed, or this user
+cannot send to it. Point `mqmanager.destinations.management-address` at the right name if it was
+renamed.
+
+**The Logs page shows nothing for a time range** — the range is in **local** time, so check it against
+the timestamps in the Time column rather than against UTC. Also remember that a limit returns the *most
+recent* matches: if the footer says older lines inside the range were left out, narrow the range rather
+than scrolling.
 
 **Kafka reports `BROKER_UNREACHABLE` against a listener that works elsewhere** — most likely the
 listener requires TLS. This build is plaintext only.

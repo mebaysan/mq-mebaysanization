@@ -29,17 +29,49 @@
 #      NoClassDefFoundError on any topic whose batches use snappy, zstd or lz4, which is the norm in
 #      production Kafka. Cost of keeping them: about 9.5 MB of JAR.
 #
-# Usage:  ./scripts/verify-portability.sh          (builds if target/mq-mebaysanization.jar is missing)
+# Usage:  ./scripts/verify-portability.sh   (builds if target/mq-mebaysanization-<version>.jar is missing)
 #
 set -uo pipefail
+shopt -s nullglob
 cd "$(dirname "$0")/.."
 
-JAR="target/mq-mebaysanization.jar"
 TREE="target/dependency-tree.txt"
 fail=0
 
 # Multi-platform, self-extracting native carriers. Matched against the bundled jar's basename.
 NATIVE_ALLOWLIST='^(zstd-jni|snappy-java|lz4-java)-'
+
+# The JAR carries the pom version in its name now, so it is resolved from disk rather than hardcoded.
+#
+# Deliberately not `mvn help:evaluate`: this is the gate that proves the build needs nothing from the
+# network, and help:evaluate would download maven-help-plugin on a clean machine to answer a question
+# the filesystem already answers. The trade is that a dirty target/ could hold two versions - so that
+# is a loud failure rather than an arbitrary pick.
+#
+# The glob cannot match the pre-repackage `<name>.jar.original` that spring-boot:repackage leaves
+# behind, because that does not end in .jar.
+resolve_jar() {
+    local matches=(target/mq-mebaysanization-*.jar)
+    if [ "${#matches[@]}" -eq 0 ]; then
+        return 1
+    fi
+    if [ "${#matches[@]}" -gt 1 ]; then
+        printf '  FAIL: several JARs in target/ - %s\n' "${matches[*]}"
+        echo   "        Run \`mvn clean package\` so there is exactly one to check."
+        exit 1
+    fi
+    JAR="${matches[0]}"
+}
+
+# Resolved up front rather than inside Gate 2b: a missing or ambiguous JAR should be reported before
+# three minutes of dependency-tree work, not after it.
+if ! resolve_jar; then
+    echo "==> No target/mq-mebaysanization-*.jar - building..."
+    mvn -B -q clean package -DskipTests >/dev/null 2>&1 || { echo "  FAIL: build errored"; exit 1; }
+    resolve_jar || { echo "  FAIL: the build produced no JAR"; exit 1; }
+fi
+echo "==> Checking $JAR"
+echo
 
 echo "==> Gate 1: jakarta.jms-api namespace"
 mvn -B -q dependency:tree -DoutputFile="$TREE" >/dev/null 2>&1 || { echo "  FAIL: dependency:tree errored"; exit 1; }
@@ -73,11 +105,6 @@ fi
 
 echo
 echo "==> Gate 2b: no native binary is required from the host"
-if [ ! -f "$JAR" ]; then
-    echo "    $JAR missing - building..."
-    mvn -B -q clean package -DskipTests >/dev/null 2>&1 || { echo "  FAIL: build errored"; exit 1; }
-fi
-
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 unzip -q -o "$JAR" 'BOOT-INF/lib/*' -d "$work"

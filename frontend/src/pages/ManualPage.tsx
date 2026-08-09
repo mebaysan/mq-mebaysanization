@@ -19,12 +19,13 @@ import { PROVIDER_CAVEATS } from '../features/queue/ProviderCaveats'
 const SECTIONS = [
   { id: 'start', title: 'Before you start' },
   { id: 'connections', title: '1. Create a connection' },
-  { id: 'open', title: '2. Open a queue or topic' },
-  { id: 'browse', title: '3. Read messages' },
-  { id: 'depth', title: '4. Read the depth' },
-  { id: 'send', title: '5. Send a message' },
-  { id: 'delete', title: '6. Delete one message' },
-  { id: 'purge', title: '7. Purge everything' },
+  { id: 'discover', title: '2. Find a queue or topic' },
+  { id: 'open', title: '3. Open a queue or topic' },
+  { id: 'browse', title: '4. Read messages' },
+  { id: 'depth', title: '5. Read the depth' },
+  { id: 'send', title: '6. Send a message' },
+  { id: 'delete', title: '7. Delete one message' },
+  { id: 'purge', title: '8. Purge everything' },
   { id: 'logs', title: 'Watching what it is doing' },
   { id: 'differences', title: 'Provider differences at a glance' },
   { id: 'errors', title: 'When something goes wrong' },
@@ -173,12 +174,60 @@ export default function ManualPage() {
         </p>
       </Section>
 
-      <Section id="open" title="2. Open a queue or topic">
+      <Section id="discover" title="2. Find a queue or topic">
         <p>
-          Open a connection and type a destination name. Names are <strong>typed, not discovered</strong>
-          : this tool does not list what exists on the broker, so the name has to be one you already
-          know. The active destination is kept in the address bar, so a link or a refresh keeps
-          working.
+          <strong>Browse…</strong> next to the name box asks the broker what it has. It is read-only:
+          nothing in that list creates, changes or deletes anything. Filter the loaded list as you
+          type, switch between queues and topics, and click a name to open it.
+        </p>
+        <p>
+          Names the broker owns rather than you — its own system and internal destinations — are hidden
+          behind <strong>Show internal</strong>. If the list was cut short, use{' '}
+          <strong>Name starts with</strong>: that goes back to the broker and asks for a narrower set,
+          which is the only way past the cap.
+        </p>
+        <p>
+          Each broker is asked a different way, and each of those ways can be switched off by whoever
+          runs it:
+        </p>
+        <Table head={['Provider', 'Lists', 'How, and what can stop it']}>
+          {PROVIDERS.map((provider) => (
+            <tr key={provider}>
+              <td className="px-3 py-2">
+                <ProviderBadge provider={provider} label={PROVIDER_FIELDS[provider].label} />
+              </td>
+              <td className="px-3 py-2">
+                {PROVIDER_CAVEATS[provider].listsTopics ? 'Queues and topics' : 'Topics'}
+              </td>
+              <td className="px-3 py-2 text-slate-600">{PROVIDER_CAVEATS[provider].listNote}</td>
+            </tr>
+          ))}
+        </Table>
+        <Warn>
+          <strong>An empty list and “the broker will not say” are different answers</strong>, and this
+          tool shows them differently. When it says it could not list, that is broker policy rather
+          than a problem with your connection — type the name instead, and everything else works
+          normally.
+        </Warn>
+        <p>
+          There is no depth column here on purpose. Two of the four brokers could answer it cheaply and
+          two could not — on those it would mean reading every message on every queue to count them.
+          Open a destination to see its depth.
+        </p>
+        <p>
+          Destinations you open are <strong>remembered</strong> and appear as chips under the name box,
+          pinned ones first and then the most recent. Pin one to keep it there; the rest are trimmed as
+          the list fills up. They are stored with the connection rather than in this browser, so they
+          are still there from another machine — and they still work on a broker that refuses to be
+          browsed. Removing a chip forgets the bookmark and changes nothing on the broker.
+        </p>
+      </Section>
+
+      <Section id="open" title="3. Open a queue or topic">
+        <p>
+          Names can be <strong>browsed or typed</strong>. Browsing asks the broker; typing always works,
+          including on a broker that will not be browsed. The active destination is kept in the address
+          bar, so a link or a refresh keeps working.
         </p>
         <p>
           What counts as a destination differs by provider, and so does what happens when you type a
@@ -197,7 +246,7 @@ export default function ManualPage() {
         </Table>
       </Section>
 
-      <Section id="browse" title="3. Read messages">
+      <Section id="browse" title="4. Read messages">
         <p>
           Browsing is <strong>non-destructive</strong>. Messages are read and left exactly where they
           were — nothing is consumed, and on Kafka no consumer-group offset is committed, so browsing
@@ -230,7 +279,7 @@ export default function ManualPage() {
         </p>
       </Section>
 
-      <Section id="depth" title="4. Read the depth">
+      <Section id="depth" title="5. Read the depth">
         <p>
           The number at the top of the destination is how many messages are there. When it is shown as{' '}
           <Code>N+</Code>, the real figure is <em>at least</em> N — the broker could not promise a
@@ -265,7 +314,7 @@ export default function ManualPage() {
         </p>
       </Section>
 
-      <Section id="send" title="5. Send a message">
+      <Section id="send" title="6. Send a message">
         <p>
           The send panel sits beside the message list. Type a body, optionally add key/value pairs,
           and send. The response gives you the id the broker assigned, which is the same id the
@@ -296,7 +345,7 @@ export default function ManualPage() {
         </p>
       </Section>
 
-      <Section id="delete" title="6. Delete one message">
+      <Section id="delete" title="7. Delete one message">
         <p>
           Where it is supported, each row has a <strong>Delete</strong> button that removes that one
           message. The answer you get back is precise, and worth reading rather than skimming:
@@ -348,7 +397,7 @@ export default function ManualPage() {
         </Table>
       </Section>
 
-      <Section id="purge" title="7. Purge everything">
+      <Section id="purge" title="8. Purge everything">
         <p>
           <strong>Purge</strong> removes every message from the destination. It asks for confirmation
           first, and it cannot be undone.
@@ -372,8 +421,21 @@ export default function ManualPage() {
             Logs
           </Link>{' '}
           page shows this application's own recent log lines as they happen — useful when an operation
-          fails and the error alone does not explain why. Filter by severity, search the text, and
-          expand any line that carried an exception to read its stack trace.
+          fails and the error alone does not explain why. Filter by severity, search the text, narrow
+          it to a time range, and expand any line that carried an exception to read its stack trace.
+        </p>
+        <p>
+          The <strong>From</strong> and <strong>To</strong> fields are in your own local time, and both
+          ends are included. The presets above them cover the common cases. Setting an end time turns{' '}
+          <strong>Live</strong> off, because no new line can arrive inside a range that has already
+          closed. Click the <strong>Time</strong> heading to read a range in the order things happened
+          instead of newest-first.
+        </p>
+        <p>
+          <strong>A page always shows the most recent matching lines.</strong> Sorting oldest-first
+          changes the order they are shown in, not which ones you get — and when older lines inside the
+          range were left out to fit, the footer says so rather than letting the first row look like the
+          beginning of the story.
         </p>
         <p>
           It is a live view, not an audit trail: the lines are held in memory, bounded, and gone on
@@ -474,9 +536,9 @@ export default function ManualPage() {
       <Section id="scope" title="What this tool will not do">
         <p>
           Knowing the edges saves time looking for a button that is not there. This version has no
-          login and no user accounts; it will not list the queues or topics that exist on a broker, so
-          names must be typed; it will not create or delete queue and topic definitions; it does not
-          browse dead-letter queues, edit or replay messages, or connect over TLS.
+          login and no user accounts; it will not create or delete queue and topic definitions; the
+          browse list carries no depth, so a destination has to be opened to see how much is on it; and
+          it does not browse dead-letter queues, edit or replay messages, or connect over TLS.
         </p>
         <p>
           A browse is a point-in-time snapshot, not a live view — use <strong>Refresh</strong> to take

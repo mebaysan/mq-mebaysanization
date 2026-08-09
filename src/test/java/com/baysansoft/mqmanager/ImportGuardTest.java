@@ -14,11 +14,26 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Guards three mistakes that compile cleanly and only fail later.
+ * Guards four mistakes that compile cleanly and only fail later.
  *
  * <p>All are cheap to make and expensive to diagnose, which is exactly what a build-time guard is for.
  */
 class ImportGuardTest {
+
+    /**
+     * Simple names that exist twice on this classpath. Importing either one compiles perfectly and
+     * fails at runtime, or — worse — works against one broker and not the other.
+     */
+    private static final List<String> AMBIGUOUS_SIMPLE_NAMES = List.of(
+            // org.apache.activemq.* (Classic) vs org.apache.activemq.artemis.jms.client.* (Artemis)
+            "ActiveMQConnectionFactory",
+            "ActiveMQConnection",
+            "ActiveMQDestination",
+            "ActiveMQQueue",
+            "ActiveMQTopic",
+            // com.ibm.mq.MQQueueManager vs
+            // com.ibm.msg.client.jakarta.wmq.compat.base.internal.MQQueueManager
+            "MQQueueManager");
 
     /** Resolved from the project root, not the working directory, which varies by runner. */
     private static Path projectDir() {
@@ -38,8 +53,8 @@ class ImportGuardTest {
     }
 
     @Test
-    @DisplayName("neither ActiveMQConnectionFactory is ever imported — the two brokers share the name")
-    void noAmbiguousConnectionFactoryImports() throws IOException {
+    @DisplayName("no class whose simple name exists twice on the classpath is ever imported")
+    void noAmbiguousSimpleNameImports() throws IOException {
         Path sourceRoot = projectDir().resolve("src/main/java");
         assumeTrue(Files.isDirectory(sourceRoot), "backend sources not present");
 
@@ -47,18 +62,25 @@ class ImportGuardTest {
         for (Path file : filesUnder(sourceRoot, ".java")) {
             for (String line : Files.readAllLines(file)) {
                 String trimmed = line.strip();
-                if (trimmed.startsWith("import ") && trimmed.contains("ActiveMQConnectionFactory")) {
-                    offenders.add(file.getFileName() + ": " + trimmed);
+                if (!trimmed.startsWith("import ")) {
+                    continue;
+                }
+                for (String ambiguous : AMBIGUOUS_SIMPLE_NAMES) {
+                    // Anchored to the last segment, so importing a genuinely unambiguous type whose
+                    // name merely contains one of these (e.g. ActiveMQQueueBrowser) is not flagged.
+                    if (trimmed.endsWith("." + ambiguous + ";")) {
+                        offenders.add(file.getFileName() + ": " + trimmed);
+                    }
                 }
             }
         }
 
         assertThat(offenders)
                 .as("""
-                        org.apache.activemq.ActiveMQConnectionFactory (Classic) and \
-                        org.apache.activemq.artemis.jms.client.ActiveMQConnectionFactory (Artemis) have \
-                        the same simple name and are both on the classpath. Write the fully-qualified \
-                        name inline instead of importing either.""")
+                        Each of %s names two different classes on this classpath — ActiveMQ Classic \
+                        against Artemis, or com.ibm.mq against the compat layer inside the Jakarta \
+                        client. Importing either compiles cleanly and fails only at runtime. Write the \
+                        fully-qualified name inline instead.""", AMBIGUOUS_SIMPLE_NAMES)
                 .isEmpty();
     }
 
@@ -88,9 +110,11 @@ class ImportGuardTest {
         assumeTrue(Files.isDirectory(sourceRoot), "backend sources not present");
 
         Path kafkaPackage = sourceRoot.resolve("com/baysansoft/mqmanager/kafka");
+        Path jmsProviderPackage = sourceRoot.resolve("com/baysansoft/mqmanager/jms/provider");
         List<String> offenders = new ArrayList<>();
         for (Path file : filesUnder(sourceRoot, ".java")) {
             boolean inKafkaPackage = file.startsWith(kafkaPackage);
+            boolean inJmsProviderPackage = file.startsWith(jmsProviderPackage);
             for (String line : Files.readAllLines(file)) {
                 String trimmed = line.strip();
                 if (!trimmed.startsWith("import ")) {
@@ -100,6 +124,11 @@ class ImportGuardTest {
                     offenders.add(file.getFileName() + ": " + trimmed);
                 }
                 if (inKafkaPackage && trimmed.contains("jakarta.jms")) {
+                    offenders.add(file.getFileName() + ": " + trimmed);
+                }
+                // PCF is IBM's base Java API, not JMS. It belongs to the one lister that speaks it and
+                // must not spread into code the other three providers share.
+                if (!inJmsProviderPackage && trimmed.contains("com.ibm.mq.headers")) {
                     offenders.add(file.getFileName() + ": " + trimmed);
                 }
                 // spring-kafka is deliberately not a dependency; an import of it would compile only
@@ -114,8 +143,9 @@ class ImportGuardTest {
                 .as("""
                         Kafka is not JMS and shares no client code with the three JMS providers. \
                         kafka-clients belongs behind com.baysansoft.mqmanager.kafka, jakarta.jms behind \
-                        com.baysansoft.mqmanager.jms, and spring-kafka is not a dependency of this \
-                        project at all — see the comment on kafka-clients in pom.xml.""")
+                        com.baysansoft.mqmanager.jms, com.ibm.mq.headers (PCF) behind \
+                        com.baysansoft.mqmanager.jms.provider, and spring-kafka is not a dependency of \
+                        this project at all — see the comment on kafka-clients in pom.xml.""")
                 .isEmpty();
     }
 

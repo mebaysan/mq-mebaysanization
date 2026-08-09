@@ -30,6 +30,102 @@ class LogBufferTest {
         buffer.add(Instant.EPOCH, level, "c.b.m.Test", "main", message, null);
     }
 
+    private static void addAt(LogBuffer buffer, Instant at, String message) {
+        buffer.add(at, LogLevel.INFO, "c.b.m.Test", "main", message, null);
+    }
+
+    // ------------------------------------------------------------------ time window and sort
+
+    @Test
+    @DisplayName("the time window includes both of its own bounds")
+    void windowIsInclusiveAtBothEnds() {
+        LogBuffer buffer = buffer(10);
+        addAt(buffer, Instant.parse("2026-08-09T10:00:00Z"), "before");
+        addAt(buffer, Instant.parse("2026-08-09T10:00:05Z"), "at-from");
+        addAt(buffer, Instant.parse("2026-08-09T10:00:07Z"), "inside");
+        addAt(buffer, Instant.parse("2026-08-09T10:00:10Z"), "at-to");
+        addAt(buffer, Instant.parse("2026-08-09T10:00:11Z"), "after");
+
+        assertThat(buffer.recent(LogLevel.TRACE, null,
+                        Instant.parse("2026-08-09T10:00:05Z"),
+                        Instant.parse("2026-08-09T10:00:10Z"),
+                        SortOrder.NEWEST_FIRST, 10)
+                .entries())
+                .extracting(LogEntry::message)
+                .containsExactly("at-to", "inside", "at-from");
+    }
+
+    @Test
+    @DisplayName("a limit always returns the NEWEST matches, even sorted oldest first")
+    void oldestFirstStillReturnsTheNewestPage() {
+        LogBuffer buffer = buffer(10);
+        for (int i = 1; i <= 5; i++) {
+            add(buffer, LogLevel.INFO, "line-" + i);
+        }
+
+        // The load-bearing assertion for the whole feature. "The first 2 ascending" would be line-1
+        // and line-2 — startup noise, with everything that just happened hidden behind it.
+        assertThat(buffer.recent(LogLevel.TRACE, null, null, null, SortOrder.OLDEST_FIRST, 2)
+                .entries())
+                .extracting(LogEntry::message)
+                .containsExactly("line-4", "line-5");
+    }
+
+    @Test
+    @DisplayName("windowTruncated says older lines were left inside the range, and is false when none were")
+    void windowTruncatedReportsWhatWasLeftOut() {
+        LogBuffer buffer = buffer(10);
+        for (int i = 1; i <= 5; i++) {
+            add(buffer, LogLevel.INFO, "line-" + i);
+        }
+
+        assertThat(buffer.recent(LogLevel.TRACE, null, null, null, SortOrder.OLDEST_FIRST, 2)
+                .windowTruncated()).isTrue();
+        assertThat(buffer.recent(LogLevel.TRACE, null, null, null, SortOrder.OLDEST_FIRST, 5)
+                .windowTruncated()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a line stamped out of insertion order is still found, because the window is filtered not seeked")
+    void outOfOrderTimestampsAreStillMatched() {
+        LogBuffer buffer = buffer(10);
+        // Two threads logging in the same millisecond can land a marginally older stamp after a newer
+        // one. An early break at the window edge would drop this straggler.
+        addAt(buffer, Instant.parse("2026-08-09T10:00:09Z"), "newer");
+        addAt(buffer, Instant.parse("2026-08-09T10:00:08Z"), "straggler");
+        addAt(buffer, Instant.parse("2026-08-09T09:00:00Z"), "well-outside");
+
+        assertThat(buffer.recent(LogLevel.TRACE, null,
+                        Instant.parse("2026-08-09T10:00:00Z"), null, SortOrder.NEWEST_FIRST, 10)
+                .entries())
+                .extracting(LogEntry::message)
+                .containsExactly("straggler", "newer");
+    }
+
+    @Test
+    @DisplayName("the short form is unchanged: no window, newest first")
+    void shortFormStillMeansEverythingNewestFirst() {
+        LogBuffer buffer = buffer(10);
+        addAt(buffer, Instant.parse("2020-01-01T00:00:00Z"), "old");
+        addAt(buffer, Instant.parse("2026-08-09T10:00:00Z"), "new");
+
+        LogBuffer.Snapshot snapshot = buffer.recent(LogLevel.TRACE, null, 10);
+
+        assertThat(snapshot.entries()).extracting(LogEntry::message).containsExactly("new", "old");
+        assertThat(snapshot.order()).isEqualTo(SortOrder.NEWEST_FIRST);
+        assertThat(snapshot.windowTruncated()).isFalse();
+    }
+
+    @Test
+    @DisplayName("an unknown sort order is rejected by name, like an unknown level")
+    void sortOrderParseRejectsUnknownValues() {
+        assertThat(SortOrder.parse(" oldest_first ")).isEqualTo(SortOrder.OLDEST_FIRST);
+        assertThatThrownBy(() -> SortOrder.parse("sideways"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("NEWEST_FIRST")
+                .hasMessageContaining("OLDEST_FIRST");
+    }
+
     @Test
     @DisplayName("the newest line comes first, because that is the one being waited for")
     void newestFirst() {

@@ -7,6 +7,8 @@ import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.ConnectionTestResult;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
+import com.baysansoft.mqmanager.messaging.model.DestinationListing;
+import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 
@@ -53,6 +55,15 @@ public interface MessagingOperations {
             Map<String, String> properties) {
         return send(profile, queueName, body, properties, null);
     }
+
+    /**
+     * What destinations the broker has.
+     *
+     * <p>No default: every provider can answer this in some form, and a provider that quietly inherited
+     * "not supported" would be a Browse button that fails at click time. A broker that <em>will not</em>
+     * answer is reported inside {@link DestinationListing}, not thrown — see that type for the rule.
+     */
+    DestinationListing listDestinations(ConnectionProfile profile, DestinationQuery query);
 
     BrowseResult browse(ConnectionProfile profile, String queueName, int limit);
 

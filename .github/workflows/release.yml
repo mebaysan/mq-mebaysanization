@@ -130,13 +130,10 @@ jobs:
       - name: Verify portability
         run: ./scripts/verify-portability.sh
 
-      # finalName is fixed at mq-mebaysanization so the run command stays `java -jar target/mq-mebaysanization.jar`.
-      # Stamp the version onto a copy, so an archived or attached JAR says what it is.
-      - name: Stamp the version onto a copy of the JAR
-        run: |
-          set -euo pipefail
-          cp target/mq-mebaysanization.jar "target/mq-mebaysanization-${{ steps.versions.outputs.release }}.jar"
-          ls -lh target/mq-mebaysanization*.jar
+      # No stamping step here any more. pom.xml has no <finalName>, so Maven's default applies and the
+      # build above - which ran AFTER versions:set - already produced
+      # target/mq-mebaysanization-<release>.jar. A `cp` from the old unversioned name to the new one
+      # would now be `cp X X`, which is a hard error rather than a no-op.
 
       - name: Commit the release version and tag it
         run: |
@@ -207,7 +204,7 @@ jobs:
             echo "|---|---|"
             echo "| Released | \`${{ steps.versions.outputs.release }}\` |"
             echo "| main now on | \`${{ steps.versions.outputs.next }}\` |"
-            echo "| JAR | \`$(du -h target/mq-mebaysanization.jar | cut -f1)\` |"
+            echo "| JAR | \`$(du -h "target/mq-mebaysanization-${{ steps.versions.outputs.release }}.jar" | cut -f1)\` |"
             if [ "${{ vars.PUBLISH_JAR }}" = "true" ]; then
               echo "| JAR attached | yes (PUBLISH_JAR is set) |"
             else

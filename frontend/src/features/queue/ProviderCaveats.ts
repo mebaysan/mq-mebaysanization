@@ -34,6 +34,12 @@ export interface ProviderCaveat {
   hasMessageKey: boolean
   /** What the send form calls its key/value rows. */
   propertiesLabel: string
+  /** Label for the button and the modal that browses the broker, e.g. "Browse queues". */
+  listLabel: string
+  /** How this broker is asked for its destinations, and what can stop it answering. */
+  listNote: string
+  /** False when this provider only ever has one kind of destination, which hides the kind filter. */
+  listsTopics: boolean
 }
 
 export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
@@ -54,6 +60,13 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
       'individual delete can fail even though the message is visible above.',
     hasMessageKey: false,
     propertiesLabel: 'Custom properties',
+    listLabel: 'Browse queues and topics',
+    listNote:
+      'ActiveMQ Classic publishes its destinations on advisory topics, which ride the same ' +
+      'connection. A broker running with advisorySupport=false sends nothing, and from a client ' +
+      'that is indistinguishable from a broker with no destinations — so an empty answer is ' +
+      'reported as "could not list", never as "there is nothing here".',
+    listsTopics: true,
   },
   ARTEMIS: {
     noun: 'queue',
@@ -70,6 +83,13 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     deleteNote: null,
     hasMessageKey: false,
     propertiesLabel: 'Custom properties',
+    listLabel: 'Browse queues and topics',
+    listNote:
+      'Artemis answers a management request sent to activemq.management. A broker that disables ' +
+      'that address, or a user without permission to send to it, cannot be listed. Artemis has ' +
+      'addresses and queues rather than JMS queues and topics: an address with a queue of the same ' +
+      'name is shown as a queue, one without is shown as a topic.',
+    listsTopics: true,
   },
   IBM_MQ: {
     noun: 'queue',
@@ -86,6 +106,12 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     deleteNote: null,
     hasMessageKey: false,
     propertiesLabel: 'Custom properties',
+    listLabel: 'Browse queues and topics',
+    listNote:
+      'IBM MQ is asked over PCF, through SYSTEM.ADMIN.COMMAND.QUEUE. That needs the command server ' +
+      'running (START CMDSERV) and +dsp authority on the queue manager. Topics listed are ' +
+      'administrative topic objects, not topic strings, and SYSTEM.* objects are marked internal.',
+    listsTopics: true,
   },
   KAFKA: {
     noun: 'topic',
@@ -105,6 +131,12 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     deleteNote: null,
     hasMessageKey: true,
     propertiesLabel: 'Record headers',
+    listLabel: 'Browse topics',
+    listNote:
+      'Kafka lists every topic this user is allowed to describe. A cluster that withholds Describe ' +
+      'on itself cannot be listed, though reading one named topic still works. Internal topics such ' +
+      'as __consumer_offsets are marked as the broker reports them, not guessed at by name.',
+    listsTopics: false,
   },
 }
 

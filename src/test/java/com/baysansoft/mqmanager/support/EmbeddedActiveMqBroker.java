@@ -34,12 +34,24 @@ public class EmbeddedActiveMqBroker {
     private BrokerService broker;
     private String url;
 
+    /** Advisories off, which is what every message-level test wants. */
     public void start() throws Exception {
+        start(false);
+    }
+
+    /**
+     * @param advisorySupport true to let the broker publish {@code ActiveMQ.Advisory.*}. Off for every
+     *                        message-level test, because the advisory destinations would otherwise show
+     *                        up in their listings — and off is also the exact shape of the locked-down
+     *                        broker that {@code ActiveMqDestinationListerTest} needs to prove the
+     *                        "cannot tell you" path, so it is reproduced here for free
+     */
+    public void start(boolean advisorySupport) throws Exception {
         broker = new BrokerService();
         broker.setBrokerName("mqm-test-" + UUID.randomUUID());
         broker.setPersistent(false);        // MemoryPersistenceAdapter; no KahaDB, no files on disk
         broker.setUseJmx(false);            // defaults to true and clashes across parallel test classes
-        broker.setAdvisorySupport(false);   // keeps ActiveMQ.Advisory.* destinations out of listings
+        broker.setAdvisorySupport(advisorySupport);
         broker.setSchedulerSupport(false);
         broker.setUseShutdownHook(false);
         broker.setDeleteAllMessagesOnStartup(true);

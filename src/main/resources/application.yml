@@ -31,6 +31,24 @@ mqmanager:
     receive-timeout: 5s
     # Bound on the non-destructive browse used to tell "not there" apart from "cannot be reached".
     disambiguation-limit: 5000
+  destinations:
+    # Listing what is on a broker. One round trip per call, never cached (a stale list is worse than a
+    # slow one for an admin tool, and there is no invalidation signal to observe), so both bounds are real.
+    default-limit: 500
+    max-limit: 2000
+    # Overall wall-clock budget for one listing, on every provider.
+    timeout: 5s
+    # ActiveMQ Classic only. Advisory messages arrive asynchronously with no completion signal, so the
+    # scan waits for the count to stop growing and gives up here. Raise it on a broker with thousands
+    # of destinations or a slow link — under-running this window under-reports.
+    advisory-settle: 1500ms
+    advisory-quiet-period: 250ms
+    # Artemis only. Brokers may rename the management address.
+    management-address: activemq.management
+    # IBM MQ only. How long PCF waits for the command server's reply.
+    command-wait: 5s
+    # Remembered destinations kept per connection. Pinned ones are never evicted, so this is a soft cap.
+    saved-per-connection: 50
   kafka:
     # Kafka's own defaults run to minutes — max.block.ms alone is 60s, and it is what a producer waits
     # on for a topic that does not exist. There is no shared connection to bound, so every call carries

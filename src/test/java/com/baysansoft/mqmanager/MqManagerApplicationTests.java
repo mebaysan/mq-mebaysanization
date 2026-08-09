@@ -14,6 +14,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.jms.ConnectionFactoryRegistry;
+import com.baysansoft.mqmanager.jms.DestinationListerRegistry;
 import com.baysansoft.mqmanager.messaging.MessagingOperationsRouter;
 import com.baysansoft.mqmanager.web.MqOperationException;
 
@@ -45,6 +46,9 @@ class MqManagerApplicationTests {
     private ConnectionFactoryRegistry registry;
 
     @Autowired
+    private DestinationListerRegistry listers;
+
+    @Autowired
     private MessagingOperationsRouter router;
 
     @Test
@@ -59,6 +63,22 @@ class MqManagerApplicationTests {
                     .isNotNull();
             assertThat(registry.forProvider(provider).provider()).isEqualTo(provider);
         }
+    }
+
+    @Test
+    @DisplayName("every JMS provider also has a destination lister, so no Browse button fails at click time")
+    void everyJmsProviderCanBeListed() {
+        for (Provider provider : Provider.values()) {
+            if (!provider.isJms()) {
+                continue;
+            }
+            assertThat(listers.forProvider(provider))
+                    .as("no DestinationLister registered for %s", provider)
+                    .isNotNull();
+            assertThat(listers.forProvider(provider).provider()).isEqualTo(provider);
+        }
+        // Kafka lists topics through its own admin client, so it deliberately has no lister here.
+        assertThat(listers.forProvider(Provider.KAFKA)).isNull();
     }
 
     @Test

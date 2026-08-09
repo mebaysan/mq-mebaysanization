@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -15,7 +16,9 @@ import java.util.function.Supplier;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.DeleteRecordsOptions;
 import org.apache.kafka.clients.admin.DeletedRecords;
+import org.apache.kafka.clients.admin.ListTopicsOptions;
 import org.apache.kafka.clients.admin.RecordsToDelete;
+import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -27,6 +30,7 @@ import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.errors.AuthorizationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -34,6 +38,7 @@ import org.springframework.stereotype.Service;
 
 import com.baysansoft.mqmanager.config.MqManagerProperties;
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
+import com.baysansoft.mqmanager.domain.DestinationKind;
 import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.jms.BrokerPasswordResolver;
 import com.baysansoft.mqmanager.jms.BrokerUrls;
@@ -42,6 +47,10 @@ import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.ConnectionTestResult;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
+import com.baysansoft.mqmanager.messaging.model.DestinationEntry;
+import com.baysansoft.mqmanager.messaging.model.DestinationListing;
+import com.baysansoft.mqmanager.messaging.model.DestinationListings;
+import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
 import com.baysansoft.mqmanager.web.MqOperationException;
@@ -73,6 +82,12 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
     private static final Logger log = LoggerFactory.getLogger(KafkaMessagingOperations.class);
 
     private static final Set<Provider> PROVIDERS = EnumSet.of(Provider.KAFKA);
+
+    /** Named the way the error translator names every other action, for consistent error text. */
+    private static final String LIST_ACTION = "list topics";
+
+    /** Carried into the listing so the UI can say how the answer was obtained. */
+    private static final String SOURCE = "the Kafka admin API";
 
     private final KafkaClientFactory clientFactory;
     private final BrokerPasswordResolver passwordResolver;
@@ -310,6 +325,71 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
         } finally {
             closeQuietly(() -> admin.close(closeTimeout()));
             closeQuietly(() -> consumer.close(closeTimeout()));
+        }
+    }
+
+    // ------------------------------------------------------------------ list destinations
+
+    /**
+     * Every topic this user may describe.
+     *
+     * <p>The only provider with no {@code DestinationLister}: Kafka has no {@code jakarta.jms} API and
+     * so no connection-factory registry to hang one off, and the admin client is already here.
+     *
+     * <p>{@code listInternal(true)} plus the per-entry {@code internal} flag beats hiding internal
+     * topics server-side: {@code TopicListing.isInternal()} is the broker's own answer, so
+     * {@code __consumer_offsets} is marked rather than guessed at from its name, and the UI toggle that
+     * reveals it is discoverable.
+     */
+    @Override
+    public DestinationListing listDestinations(ConnectionProfile profile, DestinationQuery query) {
+        MqManagerProperties.Destinations settings = properties.getDestinations();
+        int limit = query.limit() <= 0
+                ? settings.getDefaultLimit()
+                : Math.min(query.limit(), settings.getMaxLimit());
+
+        Admin admin = clientFactory.admin(profile, passwordResolver.resolve(profile));
+        try {
+            Map<String, TopicListing> listings = admin
+                    .listTopics(new ListTopicsOptions().timeoutMs(apiTimeoutMs()).listInternal(true))
+                    .namesToListings()
+                    .get(apiTimeoutMs(), TimeUnit.MILLISECONDS);
+
+            List<DestinationEntry> found = new ArrayList<>(listings.size());
+            for (TopicListing listing : listings.values()) {
+                // Every Kafka destination is a topic. There is no queue to distinguish it from.
+                found.add(new DestinationEntry(listing.name(), DestinationKind.TOPIC,
+                        listing.isInternal()));
+            }
+            return DestinationListings.finish(found, query.kind(), query.prefix(), limit, SOURCE,
+                    "Kafka has topics, never queues. Internal topics such as __consumer_offsets are "
+                            + "marked as the broker reports them, not guessed at from their names.");
+
+        } catch (ExecutionException e) {
+            // The cluster answered and said no. That is broker policy, not a broken connection, so it
+            // comes back as a listing that admits it rather than as an error response.
+            Throwable cause = e.getCause();
+            if (cause instanceof AuthorizationException) {
+                return DestinationListing.unavailable(limit, SOURCE,
+                        DestinationListing.NOT_PERMITTED,
+                        "This user is connected but is not allowed to describe the cluster, so its "
+                                + "topics cannot be listed. Type a topic name instead — reading one "
+                                + "topic needs only Describe and Read on that topic.");
+            }
+            if (cause instanceof org.apache.kafka.common.errors.TimeoutException) {
+                return DestinationListing.unavailable(limit, SOURCE, DestinationListing.TIMED_OUT,
+                        "The cluster did not return its topic list within " + apiTimeoutMs() + " ms.");
+            }
+            throw errorTranslator.translate(e, profile, LIST_ACTION);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw errorTranslator.translate(e, profile, LIST_ACTION);
+        } catch (MqOperationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw errorTranslator.translate(e, profile, LIST_ACTION);
+        } finally {
+            closeQuietly(() -> admin.close(closeTimeout()));
         }
     }
 
