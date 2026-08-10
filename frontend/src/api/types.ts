@@ -55,6 +55,23 @@ export type DestinationKind = 'QUEUE' | 'TOPIC' | 'UNKNOWN'
 export type MessageType = 'TEXT' | 'BYTES'
 
 /**
+ * Whether IBM MQ writes an MQRFH2 header ahead of the body, on IBM MQ only.
+ *
+ * `JMS` is the client's own default and prefixes every message with an MQRFH2 carrying the `mcd`, `jms`
+ * and `usr` folders. A JMS reader consumes that header; an application doing a native `MQGET` does not,
+ * and receives it as the first bytes of its payload — which is why an XML parser fails at line 1,
+ * column 0 on a body that looks perfectly well formed in the browse view. `MQ` suppresses it, so the
+ * queue holds the body and nothing else.
+ *
+ * Independent of `MessageType`, and choosing `BYTES` never removed the header — it only changed
+ * `<Msd>jms_text</Msd>` to `<Msd>jms_bytes</Msd>` inside it. The two compose: with `MQ`, `TEXT` puts the
+ * message as `MQSTR` (convertible, in the destination CCSID) and `BYTES` as `MQFMT_NONE` (byte-exact).
+ *
+ * The other three providers reject any value, since none of them writes a header of its own.
+ */
+export type TargetClient = 'JMS' | 'MQ'
+
+/**
  * How much of a destination listing to trust.
  *
  * An empty `destinations` array means "there is genuinely nothing here" ONLY when this is `COMPLETE`.

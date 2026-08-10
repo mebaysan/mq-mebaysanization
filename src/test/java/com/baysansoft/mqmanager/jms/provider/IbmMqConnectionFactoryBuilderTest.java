@@ -9,6 +9,7 @@ import org.mockito.Mockito;
 
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.domain.Provider;
+import com.baysansoft.mqmanager.messaging.model.TargetClient;
 import com.ibm.mq.jakarta.jms.MQConnectionFactory;
 import com.ibm.msg.client.jakarta.wmq.WMQConstants;
 
@@ -110,6 +111,81 @@ class IbmMqConnectionFactoryBuilderTest {
         Queue notAnMqDestination = Mockito.mock(Queue.class);
 
         assertThatCode(() -> builder.tuneDestination(notAnMqDestination)).doesNotThrowAnyException();
+    }
+
+    /**
+     * A destination is a local property bag until it is used, so this needs no queue manager — the same
+     * reason the factory assertions above need none. Written fully qualified: {@code MQQueue} names
+     * three different classes in this jar, and {@code ImportGuardTest} bans the import in {@code
+     * src/main} for exactly that reason.
+     */
+    private static com.ibm.mq.jakarta.jms.MQQueue queue() throws Exception {
+        return new com.ibm.mq.jakarta.jms.MQQueue("DEV.QUEUE.1");
+    }
+
+    @Test
+    @DisplayName("asking for target client MQ sets TARGCLIENT(MQ), which is the one thing that stops an "
+            + "MQRFH2 header being written ahead of the body")
+    void targetClientMqTurnsOffTheRfh2Header() throws Exception {
+        com.ibm.mq.jakarta.jms.MQQueue destination = queue();
+
+        builder.applyTargetClient(destination, TargetClient.MQ);
+
+        // This is the assertion the whole fix rests on, and the only one here that proves anything on
+        // its own: getTargetClient() swallows a JMSException and answers 0, so a "still JMS" assertion
+        // cannot tell a real 0 from a failed read. A 1 can only have been set.
+        assertThat(destination.getTargetClient())
+                .as("TARGCLIENT(MQ) — the queue holds the body and nothing else")
+                .isEqualTo(WMQConstants.WMQ_CLIENT_NONJMS_MQ);
+    }
+
+    @Test
+    @DisplayName("asking for target client JMS pins TARGCLIENT(JMS) rather than trusting the client "
+            + "default, so an mqclient.ini stanza cannot quietly change what a JMS send puts on the wire")
+    void targetClientJmsIsPinnedRatherThanLeftToTheClientDefault() throws Exception {
+        com.ibm.mq.jakarta.jms.MQQueue destination = queue();
+        // Set the other value first, so this proves the setter ran rather than proving the default.
+        builder.applyTargetClient(destination, TargetClient.MQ);
+
+        builder.applyTargetClient(destination, TargetClient.JMS);
+
+        assertThat(destination.getTargetClient()).isEqualTo(WMQConstants.WMQ_CLIENT_JMS_COMPLIANT);
+    }
+
+    @Test
+    @DisplayName("the two destination tunings compose: choosing a target client leaves read-ahead "
+            + "disabled, so a send option can never start a purge count under-reporting")
+    void readAheadSurvivesATargetClient() throws Exception {
+        com.ibm.mq.jakarta.jms.MQQueue destination = queue();
+
+        builder.tuneDestination(destination);
+        builder.applyTargetClient(destination, TargetClient.MQ);
+
+        assertThat(destination.getReadAheadAllowed())
+                .isEqualTo(WMQConstants.WMQ_READ_AHEAD_ALLOWED_DISABLED);
+        assertThat(destination.getTargetClient()).isEqualTo(WMQConstants.WMQ_CLIENT_NONJMS_MQ);
+    }
+
+    @Test
+    @DisplayName("tuneDestination on its own never touches the target client, which is what keeps "
+            + "browse, depth, purge and delete off a property only a PUT reads")
+    void tuneDestinationAloneNeverTouchesTheTargetClient() throws Exception {
+        com.ibm.mq.jakarta.jms.MQQueue destination = queue();
+        builder.applyTargetClient(destination, TargetClient.MQ);
+
+        builder.tuneDestination(destination);
+
+        assertThat(destination.getTargetClient()).isEqualTo(WMQConstants.WMQ_CLIENT_NONJMS_MQ);
+    }
+
+    @Test
+    @DisplayName("applying a target client to a queue that is not an MQDestination is ignored instead "
+            + "of throwing")
+    void applyTargetClientIgnoresAQueueThatIsNotAnMqDestination() {
+        Queue notAnMqDestination = Mockito.mock(Queue.class);
+
+        assertThatCode(() -> builder.applyTargetClient(notAnMqDestination, TargetClient.MQ))
+                .doesNotThrowAnyException();
     }
 
     @Test

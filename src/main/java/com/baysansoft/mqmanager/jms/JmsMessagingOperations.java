@@ -27,6 +27,7 @@ import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
+import com.baysansoft.mqmanager.messaging.model.TargetClient;
 import com.baysansoft.mqmanager.web.MqOperationException;
 
 import jakarta.jms.BytesMessage;
@@ -118,9 +119,41 @@ public class JmsMessagingOperations implements ProviderMessagingOperations {
                     "A message key applies only to Kafka, where it selects the partition. "
                             + profile.getProvider().displayName() + " has no equivalent.");
         }
+        TargetClient targetClient = outbound.targetClient();
+        // The capability, never the enum constant: this class is written once for three brokers and
+        // stays that way. Checked before the properties rule below, so a caller who aimed the option at
+        // the wrong broker gets told that rather than being told about a header their broker has not got.
+        if (targetClient != null && !profile.getProvider().supportsTargetClient()) {
+            throw new MqOperationException("OPERATION_NOT_SUPPORTED", HttpStatus.BAD_REQUEST,
+                    "A target client applies only to IBM MQ, where it decides whether an MQRFH2 header "
+                            + "is written ahead of the body. " + profile.getProvider().displayName()
+                            + " has no equivalent.");
+        }
+        if (targetClient == TargetClient.MQ && !outbound.properties().isEmpty()) {
+            // Refused, not dropped, for the same reason a key is: a 201 carrying a message id would
+            // read as though the properties had travelled. Custom properties live in the MQRFH2 usr
+            // folder, and MQ is precisely the instruction not to write an MQRFH2.
+            //
+            // Blanket, although it need not be: the JMS_IBM_* names map onto MQMD fields and would in
+            // fact survive. Telling those apart would mean encoding IBM's mapping table here and
+            // enabling MQMD writes on the destination, and then being right about every entry forever.
+            // Refusing all of them is the honest simplification, not an oversight to be "fixed".
+            throw new MqOperationException("OPERATION_NOT_SUPPORTED", HttpStatus.BAD_REQUEST,
+                    "Custom properties travel in the MQRFH2 usr folder, and target client MQ is the "
+                            + "instruction not to write an MQRFH2 at all — so they would be discarded "
+                            + "on the way to the queue. Send without them, or use target client JMS.");
+        }
         return execute(profile, "send a message", Session.AUTO_ACKNOWLEDGE, (session, builder) -> {
             Queue queue = session.createQueue(queueName);
+            // Read-ahead is meaningless to a producer, but every one of the seven destination paths
+            // tunes the same way and that uniformity is worth more than the line it saves here.
             builder.tuneDestination(queue);
+            if (targetClient != null) {
+                // Only on this path. TARGCLIENT is consulted on a PUT and nowhere else — a message
+                // already on the queue is read back from its MQMD format, so setting it on a browse or
+                // a purge would be a setting with no meaning that a later reader has to disprove.
+                builder.applyTargetClient(queue, targetClient);
+            }
 
             try (MessageProducer producer = session.createProducer(queue)) {
                 Prepared prepared = prepare(session, outbound);

@@ -10,6 +10,7 @@ import static com.baysansoft.mqmanager.domain.Provider.Capability.REQUIRES_QUEUE
 import static com.baysansoft.mqmanager.domain.Provider.Capability.SELECTOR_REACHES_ALL_MESSAGES;
 import static com.baysansoft.mqmanager.domain.Provider.Capability.SUPPORTS_BROKER_URL_OVERRIDE;
 import static com.baysansoft.mqmanager.domain.Provider.Capability.SUPPORTS_SINGLE_MESSAGE_DELETE;
+import static com.baysansoft.mqmanager.domain.Provider.Capability.SUPPORTS_TARGET_CLIENT;
 import static com.baysansoft.mqmanager.domain.Provider.Capability.USES_BOOTSTRAP_SERVERS;
 
 /**
@@ -20,7 +21,7 @@ import static com.baysansoft.mqmanager.domain.Provider.Capability.USES_BOOTSTRAP
  * would make the tool lie to its user. Kafka is not JMS at all and differs far more than the others do
  * from each other.
  *
- * <p>Capabilities are a {@link Set} rather than a constructor full of positional booleans: at eight
+ * <p>Capabilities are a {@link Set} rather than a constructor full of positional booleans: at nine
  * flags a positional list is unreadable and one transposed argument is a silent behaviour change.
  */
 public enum Provider {
@@ -54,10 +55,14 @@ public enum Provider {
      * <p>A {@code JMSMessageID} selector is translated into an {@code MQGET} with
      * {@code MQMO_MATCH_MSG_ID} — a native queue-manager match that reaches any depth. Queues are never
      * auto-created: an unknown name fails with reason code 2085.
+     *
+     * <p>It is also the only provider that writes a header of its own ahead of the body: a JMS put
+     * carries an MQRFH2 unless the destination's {@code TARGCLIENT} says otherwise, which is invisible
+     * to a JMS reader and the first thing a native {@code MQGET} reader trips over.
      */
     IBM_MQ("IBM MQ", EnumSet.of(
             JMS, BROWSE_IS_COMPLETE, SELECTOR_REACHES_ALL_MESSAGES, REQUIRES_QUEUE_MANAGER,
-            SUPPORTS_SINGLE_MESSAGE_DELETE)),
+            SUPPORTS_SINGLE_MESSAGE_DELETE, SUPPORTS_TARGET_CLIENT)),
 
     /**
      * Apache Kafka, over {@code kafka-clients} directly. There is no JMS API and no connection factory:
@@ -91,6 +96,8 @@ public enum Provider {
         SUPPORTS_BROKER_URL_OVERRIDE,
         /** One message can be removed without touching the rest. */
         SUPPORTS_SINGLE_MESSAGE_DELETE,
+        /** A send can choose whether the provider writes a header of its own ahead of the body. */
+        SUPPORTS_TARGET_CLIENT,
         /** Addressed by a comma-separated bootstrap list instead of a single host and port. */
         USES_BOOTSTRAP_SERVERS
     }
@@ -144,6 +151,14 @@ public enum Provider {
     /** One message can be deleted on its own. False for Kafka, whose log is immutable. */
     public boolean supportsSingleMessageDelete() {
         return has(SUPPORTS_SINGLE_MESSAGE_DELETE);
+    }
+
+    /**
+     * A send can say whether the provider writes its own header ahead of the body. IBM MQ only, where
+     * that header is the MQRFH2 and its absence is what a native {@code MQGET} reader needs.
+     */
+    public boolean supportsTargetClient() {
+        return has(SUPPORTS_TARGET_CLIENT);
     }
 
     /** Addressed by a comma-separated {@code host:port} bootstrap list rather than a single host/port. */

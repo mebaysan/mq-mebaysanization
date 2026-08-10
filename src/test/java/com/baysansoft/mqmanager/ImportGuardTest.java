@@ -33,7 +33,16 @@ class ImportGuardTest {
             "ActiveMQTopic",
             // com.ibm.mq.MQQueueManager vs
             // com.ibm.msg.client.jakarta.wmq.compat.base.internal.MQQueueManager
-            "MQQueueManager");
+            "MQQueueManager",
+            // com.ibm.mq.MQDestination (the base Java API's, an MQManagedObject subclass) vs
+            // com.ibm.mq.jakarta.jms.MQDestination. Neither is final, so `queue instanceof
+            // MQDestination` compiles against either — and against the wrong one it is simply always
+            // false. That would silently stop IbmMqConnectionFactoryBuilder disabling read-ahead, which
+            // shows up much later as a purge count that under-reports.
+            "MQDestination",
+            // com.ibm.mq.MQQueue vs com.ibm.mq.jakarta.jms.MQQueue vs
+            // com.ibm.msg.client.jakarta.wmq.compat.base.internal.MQQueue
+            "MQQueue");
 
     /** Resolved from the project root, not the working directory, which varies by runner. */
     private static Path projectDir() {

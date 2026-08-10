@@ -323,7 +323,7 @@ things below.
 | Depth | Browse-and-count, capped at 10,000, sometimes `N+` | `Σ(end offset − start offset)` across partitions. **Exact**, and never `N+` — but it counts records **retained**, not records unconsumed. Records a consumer group has already read still count until retention removes them. The UI labels it "Retained", not "Depth" |
 | Purge | Consumes in a loop | `deleteRecords()` truncates each partition to its end offset. Needs the **`Delete`** ACL on the topic. Records produced after the truncation point survive, and the disk space comes back asynchronously |
 | Delete one | A selector on `JMSMessageID` | **Impossible** — 501 `OPERATION_NOT_SUPPORTED`. The button is not rendered |
-| Send | `TextMessage` **or** `BytesMessage` — your choice per send — plus string properties | `ProducerRecord` with an optional **key** (it chooses the partition) and headers. Properties become record headers, UTF-8 encoded, and come back as properties. Returns `topic-partition-offset` |
+| Send | `TextMessage` **or** `BytesMessage` — your choice per send — plus string properties. On IBM MQ you also choose per send whether an **MQRFH2 header** goes ahead of the body | `ProducerRecord` with an optional **key** (it chooses the partition) and headers. Properties become record headers, UTF-8 encoded, and come back as properties. Returns `topic-partition-offset` |
 | Body | Text, bytes and map messages | Bytes, decoded as UTF-8. A **null value is a tombstone** and is labelled as one rather than shown as an empty body — on a compacted topic it marks the key for deletion |
 
 Two more things worth knowing:
@@ -353,8 +353,55 @@ TypeError: Content must be str, found <type 'unicode'>
 that is this, and sending the same payload as **Bytes** is the fix. Bytes sends the UTF-8 encoding of what
 you typed, so it is "your text as bytes" rather than an arbitrary-binary channel. Two caveats: the mapping
 above is ActiveMQ Classic's default AMQP transformer, so a connector configured `?transformer=native` or
-`raw` may differ; and IBM MQ is not an AMQP story at all — there a bytes message is `MQFMT_NONE`, which
-still helps a native `MQGET` reader but for different reasons.
+`raw` may differ; and **IBM MQ is not an AMQP story at all** — there the body type alone changes nothing a
+native reader can see, for the reason the next section gives.
+
+### The MQRFH2 header on IBM MQ
+
+If a non-JMS reader of an IBM MQ queue fails on a message this tool sent — a Python `xml.dom.minidom`
+raising
+
+```
+ExpatError: not well-formed (invalid token): line 1, column 0
+```
+
+on a body that looks perfectly well formed in the browse view — dump the message and you will find
+something like this in front of it:
+
+```
+....RFH .....<mcd><Msd>jms_text</Msd></mcd>
+<jms><Dst>queue:///DEV.QUEUE.1</Dst><Tms>1786349326018</Tms><Dlv>2</Dlv></jms>
+<?xml version="1.0" encoding="UTF-8"?><GetFlightRequest>...
+```
+
+That is an **MQRFH2 header**. IBM MQ classes for JMS default a destination's `TARGCLIENT` to `JMS`, which
+prefixes every message with an MQRFH2 carrying the JMS metadata in its `mcd`, `jms` and `usr` folders. A
+JMS reader consumes that header and never sees it. An application doing a native `MQGET` does not, and
+receives it as the first bytes of its payload.
+
+On the send form, IBM MQ therefore offers **JMS (RFH2)** — the default, and what every send did before
+this option existed — and **MQ (no header)**, which puts the body and nothing else.
+
+**Choosing Bytes does not fix this, and trying it first is the natural mistake.** It only changes
+`<Msd>jms_text</Msd>` to `<Msd>jms_bytes</Msd>` inside a header that is still there. Body type and header
+are independent choices that compose into different MQMD formats:
+
+| Body type | Header | MQMD `Format` | What a native `MQGET` reader receives |
+|---|---|---|---|
+| Text | JMS | `MQHRF2` | Header, then body — the failure above |
+| Bytes | JMS | `MQHRF2` | Header, then body — still the failure above |
+| Text | MQ | `MQSTR` | Body only, in the destination CCSID (1208). Convertible if the getter asks for `MQGMO_CONVERT` |
+| **Bytes** | **MQ** | `MQFMT_NONE` | Body only, **byte-exact** — conversion never applies to an unnamed format |
+
+What survives without the header: the message id the 201 returns, persistence, priority, expiry and
+correlation id. They live in the MQMD, not in the MQRFH2. What does not: `JMSType`, and **custom
+properties** — they travel in the header's `usr` folder, so a send that asks for the MQ header *and*
+carries properties is **refused with a 400 rather than quietly dropping them**. Remove the rows, or send
+with the JMS header.
+
+The choice is per send rather than per connection profile, because one queue manager routinely serves
+both JMS and native readers on different queues. One honest limit either way: this tool never sets a
+reply-to queue, so a request/reply consumer reading `MQMD.ReplyToQ` finds it blank with both settings.
 
 ---
 
@@ -503,17 +550,29 @@ user `app`, password `passw0rd`, and use queue `DEV.QUEUE.1`.
 7. Purge 50,000 non-persistent messages on a queue with `DEFREADA(YES)`; the reported count must equal
    the `CURDEPTH` delta exactly. This proves read-ahead is being disabled — without it IBM MQ discards
    buffered messages on consumer close and the count silently under-reports.
-8. Wrong password → `BROKER_AUTH_FAILED` (2035). Wrong port → 2538. Wrong channel → 2540. Wrong queue
+8. **The MQRFH2 header, which is the only proof this option has** — nothing in the automated suite can
+   reach it. Dump the queue with `amqsbcg DEV.QUEUE.1 QM1` after each send:
+   - **MQ (no header) + Text** → `Format : 'MQSTR   '`, the data begins at the first byte of the body
+     with **no `RFH` eyecatcher and no `<mcd>`/`<jms>` folders**, `MsgId` matches the id the 201
+     returned, and `Persistence` is still 1.
+   - **MQ (no header) + Bytes** → `Format` is all blanks (`MQFMT_NONE`) and the bytes are exactly the
+     UTF-8 of what was typed.
+   - **JMS (RFH2)** → `Format : 'MQHRF2  '` and the `<mcd>`/`<jms>` folders are back. This is the
+     default, so it is also the regression check that nothing existing changed.
+   - Adding a custom property alongside **MQ** → **400**, and `CURDEPTH` is unchanged. Refused, not
+     dropped: there is no `usr` folder to carry it.
+   - Browse the MQ-put message back in the tool → the body is intact and the Properties panel is empty.
+9. Wrong password → `BROKER_AUTH_FAILED` (2035). Wrong port → 2538. Wrong channel → 2540. Wrong queue
    manager → 2058. Nonexistent queue → `QUEUE_NOT_FOUND` (2085).
-9. Revoke `+browse` only → MQRC 2035, which `JmsErrorTranslator` maps to `BROKER_AUTH_FAILED` (401).
+10. Revoke `+browse` only → MQRC 2035, which `JmsErrorTranslator` maps to `BROKER_AUTH_FAILED` (401).
    Note that IBM MQ reports "wrong password" and "authenticated but not permitted" with the *same*
    reason code, so this tool cannot tell them apart the way it can on Kafka, where they are 401 and 403
    respectively. If that distinction matters to you, the queue manager's own AMQERR logs have it.
-10. **Browse… lists the queue manager's objects.** `DEV.QUEUE.1` is there, `SYSTEM.*` objects appear
+11. **Browse… lists the queue manager's objects.** `DEV.QUEUE.1` is there, `SYSTEM.*` objects appear
     only with **Show internal** on, and a prefix of `DEV.` narrows it. This is the one code path in the
     project that cannot be integration-tested — PCF needs a real queue manager — so it is the step
     worth doing by hand.
-11. `echo "STOP CMDSERV" | runmqsc QM1`, then Browse… again → an amber panel reading
+12. `echo "STOP CMDSERV" | runmqsc QM1`, then Browse… again → an amber panel reading
     `DESTINATION_LIST_TIMED_OUT`, **HTTP 200 rather than an error**, and typing `DEV.QUEUE.1` still
     works. `START CMDSERV` restores it.
 
@@ -670,11 +729,15 @@ client-side thing the picker does over the page it already has, and it says so.
 On `PUT`, omitting `password` keeps the stored one and sending `""` clears it — the current value is
 never sent to the client, so an unchanged edit form has nothing to resubmit.
 
-`POST .../messages` takes `{"payload", "properties", "key", "messageType"}`. `key` is **Kafka only** —
-it selects the partition — and the JMS providers reject a non-null one rather than dropping it silently.
-`messageType` is the mirror image: **JMS only**, `TEXT` (the default when omitted) or `BYTES`, and Kafka
-rejects any value because its record values are bytes already. Both are case-insensitive; an unknown one
-is a 400 that names the values that would have worked.
+`POST .../messages` takes `{"payload", "properties", "key", "messageType", "targetClient"}`. `key` is
+**Kafka only** — it selects the partition — and the JMS providers reject a non-null one rather than
+dropping it silently. `messageType` is the mirror image: **JMS only**, `TEXT` (the default when omitted)
+or `BYTES`, and Kafka rejects any value because its record values are bytes already. `targetClient` is
+**IBM MQ only**: `JMS` (the default when omitted) or `MQ`, deciding whether an MQRFH2 header is written
+ahead of the body, and the other three reject any value. All three are case-insensitive; an unknown one
+is a 400 that names the values that would have worked. `"targetClient":"MQ"` together with a non-empty
+`properties` map is a 400 as well — the header it suppresses is the only thing that could have carried
+them, so they are refused rather than dropped.
 
 Errors always come back as `{"status", "error", "message"}`, plus a stable machine-readable `code`
 (`BROKER_AUTH_FAILED`, `QUEUE_NOT_FOUND`, `MESSAGE_UNREACHABLE`, …). Stack traces are never returned.
@@ -702,6 +765,7 @@ Kafka adds a few codes of its own, all in the same shape:
 | `BROKER_NOT_AUTHORIZED` | 403 | Connected and authenticated, but the ACL for this operation is missing. Distinct from `BROKER_AUTH_FAILED` (401), which is a bad password |
 | `QUEUE_NAME_INVALID` | 400 | Kafka rejected the topic name itself |
 | `OPERATION_NOT_SUPPORTED` | 400 | Sending with a `messageType`. Every Kafka record value is bytes already, so there is nothing to choose — refused rather than quietly ignored |
+| `OPERATION_NOT_SUPPORTED` | 400 | Sending with a `targetClient`. That chooses whether IBM MQ writes an MQRFH2 header ahead of the body; Kafka has no such header for either answer to be about |
 | `COMPRESSION_CODEC_UNAVAILABLE` | 502 | A compressed batch whose native codec could not load on this platform |
 
 ---
@@ -777,7 +841,9 @@ deleting topics.
 - Remembered destinations live in the database next to the connection, not in the browser. They are
   bookmarks, not an audit trail — this build has no users to attribute anything to.
 - A message is sent as text unless you choose bytes; see **Message bodies** for when that matters.
-  Inbound bodies are rendered as text wherever the message type allows it.
+  Inbound bodies are rendered as text wherever the message type allows it. On IBM MQ a message also
+  carries an MQRFH2 header unless you choose the MQ target client — see
+  [The MQRFH2 header on IBM MQ](#the-mqrfh2-header-on-ibm-mq).
 - A browse is a point-in-time snapshot, not a live view.
 
 ## Troubleshooting

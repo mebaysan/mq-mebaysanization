@@ -87,7 +87,7 @@ class ArtemisIntegrationTest {
         String queue = uniqueQueue();
 
         messaging.send(profile, queue,
-                new OutboundMessage("artemis wörld", Map.of(), null, MessageType.BYTES));
+                new OutboundMessage("artemis wörld", Map.of(), null, MessageType.BYTES, null));
 
         QueueMessageView view = messaging.browse(profile, queue, 1).messages().get(0);
 

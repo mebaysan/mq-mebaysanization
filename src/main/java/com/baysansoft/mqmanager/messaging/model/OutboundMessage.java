@@ -20,9 +20,13 @@ import java.util.Map;
  *                    JMS providers reject a non-null one rather than dropping it
  * @param messageType JMS only. Null means the caller did not ask, which the JMS providers read as
  *                    {@link MessageType#TEXT} and Kafka reads as "nothing to object to"
+ * @param targetClient IBM MQ only: whether an MQRFH2 header is written ahead of the body. Null means
+ *                    the caller did not ask, which leaves IBM MQ at its own default — a header,
+ *                    exactly as every send before this choice existed. The other three providers
+ *                    reject a non-null one rather than dropping it
  */
 public record OutboundMessage(String body, Map<String, String> properties, String key,
-        MessageType messageType) {
+        MessageType messageType, TargetClient targetClient) {
 
     public OutboundMessage {
         body = body == null ? "" : body;
@@ -35,7 +39,9 @@ public record OutboundMessage(String body, Map<String, String> properties, Strin
 
     /** The only form every provider supports unconditionally, and what most callers want. */
     public static OutboundMessage text(String body, Map<String, String> properties) {
-        return new OutboundMessage(body, properties, null, MessageType.TEXT);
+        // Null target client, not JMS: this factory says nothing about the header, so IBM MQ is left
+        // at its own default rather than being told to keep one.
+        return new OutboundMessage(body, properties, null, MessageType.TEXT, null);
     }
 
     /** TEXT when the caller did not ask, which is what every send did before the choice existed. */

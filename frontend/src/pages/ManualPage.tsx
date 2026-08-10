@@ -324,7 +324,7 @@ export default function ManualPage() {
           The key/value rows are named for whatever the provider calls them, and Kafka adds one extra
           field that no JMS broker has:
         </p>
-        <Table head={['Provider', 'Key/value rows are', 'Message key', 'Body type']}>
+        <Table head={['Provider', 'Key/value rows are', 'Message key', 'Body type', 'Own header']}>
           {PROVIDERS.map((provider) => {
             const caveat = PROVIDER_CAVEATS[provider]
             return (
@@ -336,6 +336,9 @@ export default function ManualPage() {
                 <td className="px-3 py-2">{caveat.hasMessageKey ? <Yes /> : <No />}</td>
                 <td className="px-3 py-2">
                   {caveat.hasMessageType ? 'Text or bytes' : 'Bytes — no choice to make'}
+                </td>
+                <td className="px-3 py-2">
+                  {caveat.hasTargetClient ? 'MQRFH2 — JMS or MQ' : <No />}
                 </td>
               </tr>
             )
@@ -355,6 +358,31 @@ export default function ManualPage() {
           your text as bytes rather than a way to send arbitrary binary. Kafka has no such choice: its
           record values are bytes already, and it refuses an explicit body type rather than accepting
           one it would not act on.
+        </p>
+        <p>
+          On IBM MQ there is a second, separate choice: the <strong>header</strong>. IBM MQ classes for
+          JMS put every message behind an <Code>MQRFH2</Code> header carrying the JMS metadata. A JMS
+          reader consumes it and never sees it. An application doing a native <Code>MQGET</Code> does
+          not, and gets it as the first bytes of its payload — which is why a body that looks perfectly
+          well formed in the list above can make a downstream XML parser fail at line 1, column 0.
+          Choose <strong>MQ (no header)</strong> and the queue holds the body and nothing else.
+        </p>
+        <Warn>
+          Choosing <strong>Bytes</strong> does not remove the MQRFH2 header, and reaching for it first
+          is the natural mistake: it only changes <Code>&lt;Msd&gt;jms_text&lt;/Msd&gt;</Code> to{' '}
+          <Code>&lt;Msd&gt;jms_bytes&lt;/Msd&gt;</Code> inside the header that is still there. The two
+          choices are independent and compose: with the MQ header, <strong>Text</strong> puts the
+          message as <Code>MQSTR</Code>, which a reader can have converted to its own CCSID, and{' '}
+          <strong>Bytes</strong> puts it as <Code>MQFMT_NONE</Code>, which is byte-exact and never
+          converted.
+        </Warn>
+        <p>
+          The header choice is per send rather than per connection, because one queue manager usually
+          serves both kinds of reader. With the MQ header, custom properties are{' '}
+          <strong>refused rather than dropped</strong>: they travel in the header's <Code>usr</Code>{' '}
+          folder, and suppressing the header is exactly the instruction not to write one. The message
+          id, persistence, priority, expiry and correlation id all survive — they live in the MQMD, not
+          in the header.
         </p>
       </Section>
 

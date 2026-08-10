@@ -37,6 +37,12 @@ export interface ProviderCaveat {
    * bytes — the server rejects an explicit choice there rather than ignoring one.
    */
   hasMessageType: boolean
+  /**
+   * True shows the JMS/MQ header choice on the send form. IBM MQ only — it is the only provider that
+   * writes a header of its own (the MQRFH2) ahead of the body, and the only one where a native reader
+   * has to be told not to expect one.
+   */
+  hasTargetClient: boolean
   /** What the send form calls its key/value rows. */
   propertiesLabel: string
   /** Label for the button and the modal that browses the broker, e.g. "Browse queues". */
@@ -65,6 +71,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
       'individual delete can fail even though the message is visible above.',
     hasMessageKey: false,
     hasMessageType: true,
+    hasTargetClient: false,
     propertiesLabel: 'Custom properties',
     listLabel: 'Browse queues and topics',
     listNote:
@@ -89,6 +96,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     deleteNote: null,
     hasMessageKey: false,
     hasMessageType: true,
+    hasTargetClient: false,
     propertiesLabel: 'Custom properties',
     listLabel: 'Browse queues and topics',
     listNote:
@@ -113,6 +121,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     deleteNote: null,
     hasMessageKey: false,
     hasMessageType: true,
+    hasTargetClient: true,
     propertiesLabel: 'Custom properties',
     listLabel: 'Browse queues and topics',
     listNote:
@@ -139,6 +148,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
     deleteNote: null,
     hasMessageKey: true,
     hasMessageType: false,
+    hasTargetClient: false,
     propertiesLabel: 'Record headers',
     listLabel: 'Browse topics',
     listNote:

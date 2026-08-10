@@ -20,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.messaging.model.MessageType;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
+import com.baysansoft.mqmanager.messaging.model.TargetClient;
 import com.baysansoft.mqmanager.support.KafkaTestFixture;
 import com.baysansoft.mqmanager.web.MqOperationException;
 
@@ -41,14 +42,14 @@ class KafkaSendTest {
 
     /** A plain send: no key, no properties, and — crucially — no message type to object to. */
     private static OutboundMessage body(String body) {
-        return new OutboundMessage(body, Map.of(), null, null);
+        return new OutboundMessage(body, Map.of(), null, null, null);
     }
 
     @Test
     @DisplayName("a sent record carries the body as UTF-8, the key, and every property as a record header")
     void sendsBodyKeyAndHeaders() {
         messaging.send(profile, KafkaTestFixture.TOPIC,
-                new OutboundMessage("hello wörld", Map.of("tenant", "acme"), "customer-7", null));
+                new OutboundMessage("hello wörld", Map.of("tenant", "acme"), "customer-7", null, null));
 
         assertThat(producer.history()).hasSize(1);
         ProducerRecord<String, byte[]> sent = producer.history().get(0);
@@ -116,7 +117,7 @@ class KafkaSendTest {
     void explicitMessageTypeIsRefused() {
         for (MessageType type : MessageType.values()) {
             assertThatThrownBy(() -> messaging.send(profile, KafkaTestFixture.TOPIC,
-                    new OutboundMessage("body", Map.of(), null, type)))
+                    new OutboundMessage("body", Map.of(), null, type, null)))
                     .isInstanceOfSatisfying(MqOperationException.class, e -> {
                         assertThat(e.getCode()).isEqualTo("OPERATION_NOT_SUPPORTED");
                         assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -124,6 +125,31 @@ class KafkaSendTest {
         }
         // Refused before the producer is ever opened, so nothing reached the topic on the way to the
         // error. A rejection that had already sent the record would be the worst of both answers.
+        assertThat(producer.history()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a Kafka send with no target client still works, since omitting it is what every "
+            + "caller written before the choice existed does")
+    void absentTargetClientIsAccepted() {
+        messaging.send(profile, KafkaTestFixture.TOPIC, body("body"));
+
+        assertThat(producer.history()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("any explicit target client is refused on Kafka, JMS included — a target client "
+            + "chooses whether IBM MQ writes an MQRFH2 header, and Kafka has no such header for either "
+            + "answer to be about")
+    void explicitTargetClientIsRefused() {
+        for (TargetClient targetClient : TargetClient.values()) {
+            assertThatThrownBy(() -> messaging.send(profile, KafkaTestFixture.TOPIC,
+                    new OutboundMessage("body", Map.of(), null, null, targetClient)))
+                    .isInstanceOfSatisfying(MqOperationException.class, e -> {
+                        assertThat(e.getCode()).isEqualTo("OPERATION_NOT_SUPPORTED");
+                        assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    });
+        }
         assertThat(producer.history()).isEmpty();
     }
 

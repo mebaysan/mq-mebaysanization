@@ -6,11 +6,17 @@ import org.springframework.util.StringUtils;
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.jms.ConnectionFactoryBuilder;
+import com.baysansoft.mqmanager.messaging.model.TargetClient;
 // The Jakarta client. Note the mandatory `.jakarta.` infix in every IBM package below: this artifact
 // contains no com.ibm.mq.jms package and no com.ibm.msg.client.wmq.WMQConstants at all, so any snippet
 // copied from the web (or from IBM's own Jakarta sample, which is wrong) will not compile.
+//
+// MQDestination is missing from this list on purpose and is written fully qualified at every use.
+// com.ibm.mq.MQDestination also ships in this jar — the base Java API's destination, an unrelated
+// MQManagedObject subclass. It is not final, so `queue instanceof MQDestination` compiles against
+// either one; against the wrong one it is simply always false, and the tunings below would silently
+// stop being applied. ImportGuardTest fails the build on an import of the simple name.
 import com.ibm.mq.jakarta.jms.MQConnectionFactory;
-import com.ibm.mq.jakarta.jms.MQDestination;
 import com.ibm.msg.client.jakarta.wmq.WMQConstants;
 
 import jakarta.jms.ConnectionFactory;
@@ -81,11 +87,43 @@ public class IbmMqConnectionFactoryBuilder implements ConnectionFactoryBuilder {
      */
     @Override
     public void tuneDestination(Queue queue) throws JMSException {
-        if (queue instanceof MQDestination destination) {
+        if (queue instanceof com.ibm.mq.jakarta.jms.MQDestination destination) {
             destination.setReadAheadAllowed(WMQConstants.WMQ_READ_AHEAD_ALLOWED_DISABLED);
         }
         // Any other Queue implementation (including test stubs) is left untouched rather than
         // triggering a ClassCastException.
+    }
+
+    /**
+     * Chooses whether an MQRFH2 header is written ahead of the body, for one send.
+     *
+     * <p>{@code WMQ_CLIENT_NONJMS_MQ} suppresses it entirely, so the queue holds the body and nothing
+     * else. That also decides the MQMD format the message ends up with, together with the body type:
+     * a text message becomes {@code MQSTR} (convertible, in the destination's CCSID) and a bytes
+     * message becomes {@code MQFMT_NONE} (byte-exact, never converted). With the header present both
+     * are {@code MQHRF2} instead, which is why choosing BYTES alone never fixed a native reader.
+     *
+     * <p>{@code JMS} is <em>set</em> rather than left to the client's own default, for the same reason
+     * {@code USER_AUTHENTICATION_MQCSP} is set explicitly above: an {@code mqclient.ini} stanza, a
+     * JVM-wide system property or a future client default must not be able to change what a send that
+     * asked for a JMS-compliant put actually puts on the wire.
+     *
+     * <p>LOAD-BEARING: {@code WMQ_MESSAGE_BODY} is the read-side mirror of this property and is
+     * deliberately never set, here or anywhere. The two look symmetric and are not — setting the read
+     * side would change how a browse renders messages that <em>other</em> applications put on the
+     * queue, folding their own MQRFH2 into the body the user is shown.
+     */
+    @Override
+    public void applyTargetClient(Queue queue, TargetClient targetClient) throws JMSException {
+        if (queue instanceof com.ibm.mq.jakarta.jms.MQDestination destination) {
+            // No default branch, for the reason JmsMessagingOperations.prepare gives: a target client
+            // added later must fail to compile rather than silently fall through to a header nobody
+            // asked for.
+            destination.setTargetClient(switch (targetClient) {
+                case JMS -> WMQConstants.WMQ_CLIENT_JMS_COMPLIANT;
+                case MQ -> WMQConstants.WMQ_CLIENT_NONJMS_MQ;
+            });
+        }
     }
 
     private static String channelOrDefault(ConnectionProfile profile) {

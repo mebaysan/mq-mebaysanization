@@ -18,6 +18,7 @@ import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.MessageType;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
+import com.baysansoft.mqmanager.messaging.model.TargetClient;
 import com.baysansoft.mqmanager.service.ConnectionProfileService;
 import com.baysansoft.mqmanager.web.dto.QueueResponses.DeleteMessageResponse;
 import com.baysansoft.mqmanager.web.dto.QueueResponses.DepthResponse;
@@ -65,10 +66,13 @@ public class QueueController {
     public ResponseEntity<SendMessageResponse> send(@PathVariable Long id,
                                                     @RequestParam String queueName,
                                                     @Valid @RequestBody SendMessageRequest request) {
-        // parseOptional, not parse: an omitted message type must stay exactly what it has always been —
-        // a text message on the JMS providers, and nothing at all to object to on Kafka.
+        // parseOptional, not parse, for both: an omitted message type must stay exactly what it has
+        // always been — a text message on the JMS providers, and nothing at all to object to on Kafka —
+        // and an omitted target client must leave IBM MQ at its own default rather than pin it to JMS,
+        // which would be this tool asserting a choice the caller never made.
         OutboundMessage message = new OutboundMessage(request.payload(), request.properties(),
-                request.key(), MessageType.parseOptional(request.messageType()));
+                request.key(), MessageType.parseOptional(request.messageType()),
+                TargetClient.parseOptional(request.targetClient()));
         String messageId = messaging.send(profile(id), requireQueueName(queueName), message);
         return ResponseEntity.status(HttpStatus.CREATED).body(new SendMessageResponse(messageId));
     }

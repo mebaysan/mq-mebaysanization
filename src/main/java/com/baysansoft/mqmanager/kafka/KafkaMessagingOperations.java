@@ -154,6 +154,14 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
                             + "different message classes on the wire. Every Kafka record value is bytes "
                             + "already, so there is nothing to choose.");
         }
+        if (outbound.targetClient() != null) {
+            // Null, not MQ, for the reason above: agreeing to JMS would imply Kafka had weighed the
+            // question and picked a side, when there is no header here for either answer to be about.
+            throw new MqOperationException("OPERATION_NOT_SUPPORTED", HttpStatus.BAD_REQUEST,
+                    "A target client is an IBM MQ setting: it chooses whether an MQRFH2 header is "
+                            + "written ahead of the body. Kafka has no such header, so there is "
+                            + "nothing to choose.");
+        }
         String body = outbound.body();
         return withProducer(profile, "send a message", producer -> {
             List<Header> recordHeaders = new ArrayList<>();

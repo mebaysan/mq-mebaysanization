@@ -23,10 +23,11 @@ import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.messaging.MessagingOperations;
 import com.baysansoft.mqmanager.messaging.model.MessageType;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
+import com.baysansoft.mqmanager.messaging.model.TargetClient;
 import com.baysansoft.mqmanager.service.ConnectionProfileService;
 
 /**
- * What the send endpoint does with a message type, at the HTTP layer.
+ * What the send endpoint does with a message type and a target client, at the HTTP layer.
  *
  * <p>The messaging layer is mocked: the question here is what reaches it, and what an unusable value
  * looks like coming back out — not what a broker then does with it.
@@ -122,5 +123,57 @@ class QueueControllerSendTest {
         OutboundMessage sent = captureSend();
         assertThat(sent.messageType()).isEqualTo(MessageType.BYTES);
         assertThat(sent.properties()).containsEntry("tenant", "acme");
+    }
+
+    @Test
+    @DisplayName("a send body with no target client reaches the messaging layer asking for nothing, "
+            + "which is what leaves IBM MQ at its own default and the other three nothing to object to")
+    void absentTargetClientStaysNull() throws Exception {
+        mockMvc.perform(post(URL).contentType("application/json")
+                        .content("""
+                                {"payload":"hello"}"""))
+                .andExpect(status().isCreated());
+
+        assertThat(captureSend().targetClient()).isNull();
+    }
+
+    @Test
+    @DisplayName("a lower-case target client is accepted, since nothing is gained by being strict about it")
+    void lowerCaseTargetClientIsAccepted() throws Exception {
+        mockMvc.perform(post(URL).contentType("application/json")
+                        .content("""
+                                {"payload":"hello","targetClient":"mq"}"""))
+                .andExpect(status().isCreated());
+
+        assertThat(captureSend().targetClient()).isEqualTo(TargetClient.MQ);
+    }
+
+    @Test
+    @DisplayName("an unknown target client is a 400 that names the two valid values, not a 500 and not "
+            + "Jackson's own message naming an internal type")
+    void unknownTargetClientIsABadRequest() throws Exception {
+        mockMvc.perform(post(URL).contentType("application/json")
+                        .content("""
+                                {"payload":"hello","targetClient":"RFH2"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("JMS")))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("MQ")))
+                .andExpect(jsonPath("$.message")
+                        .value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("com.baysansoft"))));
+    }
+
+    @Test
+    @DisplayName("a target client and a message type both arrive unchanged, since choosing whether IBM "
+            + "MQ writes a header says nothing about which message class carries the body")
+    void targetClientAndMessageTypeAreIndependent() throws Exception {
+        mockMvc.perform(post(URL).contentType("application/json")
+                        .content("""
+                                {"payload":"hello","messageType":"BYTES","targetClient":"MQ"}"""))
+                .andExpect(status().isCreated());
+
+        OutboundMessage sent = captureSend();
+        assertThat(sent.messageType()).isEqualTo(MessageType.BYTES);
+        assertThat(sent.targetClient()).isEqualTo(TargetClient.MQ);
     }
 }

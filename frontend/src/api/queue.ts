@@ -10,6 +10,7 @@ import type {
   PurgeResult,
   QueueMessage,
   SendMessageResult,
+  TargetClient,
 } from './types'
 
 export function useDepth(id: number, queueName: string, enabled: boolean) {
@@ -64,6 +65,7 @@ export function useSendMessage(id: number, queueName: string) {
       properties: Record<string, string>
       key: string | null
       messageType: MessageType | null
+      targetClient: TargetClient | null
     }) =>
       api.post<SendMessageResult>(
         `/api/connections/${id}/queue/messages?${queueQuery(queueName)}`,

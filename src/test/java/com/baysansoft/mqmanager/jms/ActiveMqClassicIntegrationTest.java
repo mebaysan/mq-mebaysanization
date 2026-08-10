@@ -23,6 +23,7 @@ import com.baysansoft.mqmanager.messaging.model.MessageType;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
+import com.baysansoft.mqmanager.messaging.model.TargetClient;
 import com.baysansoft.mqmanager.support.EmbeddedActiveMqBroker;
 import com.baysansoft.mqmanager.support.MessagingTestFixture;
 import com.baysansoft.mqmanager.web.MqOperationException;
@@ -114,7 +115,7 @@ class ActiveMqClassicIntegrationTest {
         String queue = uniqueQueue("bytes.");
 
         messaging.send(profile, queue,
-                new OutboundMessage("hello wörld", Map.of("tenant", "acme"), null, MessageType.BYTES));
+                new OutboundMessage("hello wörld", Map.of("tenant", "acme"), null, MessageType.BYTES, null));
 
         QueueMessageView view = messaging.browse(profile, queue, 1).messages().get(0);
 
@@ -134,7 +135,7 @@ class ActiveMqClassicIntegrationTest {
     void bytesBodyIsRawUtf8() throws Exception {
         String queue = uniqueQueue("raw.");
         messaging.send(profile, queue,
-                new OutboundMessage("hello wörld", Map.of(), null, MessageType.BYTES));
+                new OutboundMessage("hello wörld", Map.of(), null, MessageType.BYTES, null));
 
         Message received = receiveRaw(queue);
 
@@ -152,7 +153,7 @@ class ActiveMqClassicIntegrationTest {
     void textSendIsStillATextMessage() throws Exception {
         String queue = uniqueQueue("text.");
         messaging.send(profile, queue,
-                new OutboundMessage("hello", Map.of(), null, MessageType.TEXT));
+                new OutboundMessage("hello", Map.of(), null, MessageType.TEXT, null));
 
         assertThat(receiveRaw(queue)).isInstanceOf(TextMessage.class);
     }
@@ -162,7 +163,7 @@ class ActiveMqClassicIntegrationTest {
             + "backwards-compatible default every existing caller relies on")
     void absentMessageTypeIsATextMessage() throws Exception {
         String queue = uniqueQueue("default.");
-        messaging.send(profile, queue, new OutboundMessage("hello", Map.of(), null, null));
+        messaging.send(profile, queue, new OutboundMessage("hello", Map.of(), null, null, null));
 
         assertThat(receiveRaw(queue)).isInstanceOf(TextMessage.class);
     }
@@ -171,7 +172,7 @@ class ActiveMqClassicIntegrationTest {
     @DisplayName("an empty body sent as BYTES is a zero-length bytes message, not a message with no body")
     void emptyBytesBodyIsStillABytesMessage() throws Exception {
         String queue = uniqueQueue("emptybytes.");
-        messaging.send(profile, queue, new OutboundMessage("", Map.of(), null, MessageType.BYTES));
+        messaging.send(profile, queue, new OutboundMessage("", Map.of(), null, MessageType.BYTES, null));
 
         Message received = receiveRaw(queue);
 
@@ -184,9 +185,25 @@ class ActiveMqClassicIntegrationTest {
             + "reported success would look like the key had been honoured")
     void messageKeyIsRefused() {
         assertThatThrownBy(() -> messaging.send(profile, uniqueQueue("keyed."),
-                new OutboundMessage("body", Map.of(), "customer-7", null)))
+                new OutboundMessage("body", Map.of(), "customer-7", null, null)))
                 .isInstanceOfSatisfying(MqOperationException.class,
                         e -> assertThat(e.getCode()).isEqualTo("OPERATION_NOT_SUPPORTED"));
+    }
+
+    @Test
+    @DisplayName("a target client is refused on a provider with no MQRFH2 header to suppress, and "
+            + "nothing reaches the queue — the same treatment a message key gets")
+    void targetClientIsRefused() {
+        String queue = uniqueQueue("targeted.");
+
+        assertThatThrownBy(() -> messaging.send(profile, queue,
+                new OutboundMessage("body", Map.of(), null, null, TargetClient.MQ)))
+                .isInstanceOfSatisfying(MqOperationException.class,
+                        e -> assertThat(e.getCode()).isEqualTo("OPERATION_NOT_SUPPORTED"));
+
+        // Refused before the broker is touched, not refused after a put: a message on the queue here
+        // would mean the send half-happened while the caller was told it had not happened at all.
+        assertThat(messaging.browse(profile, queue, 10).returned()).isZero();
     }
 
     @Test
