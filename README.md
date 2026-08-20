@@ -18,7 +18,7 @@ client installation.
 ```bash
 mvn clean package
 java -jar target/mq-mebaysanization-*.jar
-# then open http://localhost:8080
+# then open http://localhost:48080
 ```
 
 The JAR carries its version in the filename — `mq-mebaysanization-<version>.jar` — so an archived or
@@ -120,7 +120,7 @@ All settings are environment variables with sensible defaults.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MQMANAGER_PORT` | `8080` | HTTP port for both the UI and the API |
+| `MQMANAGER_PORT` | `48080` | HTTP port for both the UI and the API |
 | `MQMANAGER_DATA_DIR` | `./data` | Holds the H2 database and the encryption key |
 | `MQMANAGER_ENCRYPTION_KEY` | *(generated)* | Base64-encoded 32-byte AES key. When unset, one is generated into the data directory on first run |
 | `MQMANAGER_LOG_PAYLOADS` | `true` | Permits message bodies to be written to the log at DEBUG. **Enabled**, so the only thing keeping bodies out of the log is the log level. Set it to `false` to keep them out whatever the level |
@@ -408,10 +408,10 @@ reply-to queue, so a request/reply consumer reading `MQMD.ReplyToQ` finds it bla
 ## Development
 
 ```bash
-# Terminal 1 — backend on :8080 (does not build the frontend)
+# Terminal 1 — backend on :48080 (does not build the frontend)
 mvn spring-boot:run
 
-# Terminal 2 — Vite dev server on :5173, proxying /api to :8080
+# Terminal 2 — Vite dev server on :5173, proxying /api to :48080
 cd frontend && npm run dev
 ```
 
@@ -598,7 +598,7 @@ auto-creates).
 5. Depth equals `kafka-run-class.sh kafka.tools.GetOffsetShell --time -1` minus `--time -2`, summed over
    partitions. Send 1,000 more and it goes up by exactly 1,000 — rendered with **no `+`**.
 6. **The per-row Delete button is absent.** Call it directly anyway:
-   `curl -i -X DELETE 'localhost:8080/api/connections/1/queue/messages?queueName=mq-mebaysanization-demo&messageId=mq-mebaysanization-demo-0-1'`
+   `curl -i -X DELETE 'localhost:48080/api/connections/1/queue/messages?queueName=mq-mebaysanization-demo&messageId=mq-mebaysanization-demo-0-1'`
    → **501** with `"code":"OPERATION_NOT_SUPPORTED"`, and the depth is unchanged.
 7. Purge. The reported count equals the previous depth exactly, depth then reads 0, and
    `kafka-console-consumer.sh --from-beginning` returns nothing.

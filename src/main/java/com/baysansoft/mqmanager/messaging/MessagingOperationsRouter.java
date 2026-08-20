@@ -17,6 +17,7 @@ import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
+import com.baysansoft.mqmanager.messaging.model.MessageQuery;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
@@ -82,6 +83,12 @@ public class MessagingOperationsRouter implements MessagingOperations {
     @Override
     public BrowseResult browse(ConnectionProfile profile, String queueName, int limit) {
         return forProfile(profile).browse(profile, queueName, limit);
+    }
+
+    @Override
+    public BrowseResult browse(ConnectionProfile profile, String queueName, int limit,
+            MessageQuery query) {
+        return forProfile(profile).browse(profile, queueName, limit, query);
     }
 
     @Override

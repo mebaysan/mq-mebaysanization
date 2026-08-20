@@ -10,7 +10,7 @@ import { CheckIcon, CopyIcon } from './icons'
  * all they have. It flips to "Copied" for a moment, then back.
  *
  * <p>`navigator.clipboard` needs a secure context, which `localhost` is but a plain-http LAN address is
- * not — this tool is often opened at `http://some-host:8080`. So there is a deliberate fallback through
+ * not — this tool is often opened at `http://some-host:48080`. So there is a deliberate fallback through
  * a hidden textarea and `execCommand`, which works there too. Neither path throws into the UI.
  */
 export function CopyButton({

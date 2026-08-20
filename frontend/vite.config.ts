@@ -16,10 +16,10 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
-    // Development only: `npm run dev` serves the UI while Spring Boot serves the API on 8080.
+    // Development only: `npm run dev` serves the UI while Spring Boot serves the API on 48080.
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:48080',
         changeOrigin: true,
       },
     },
