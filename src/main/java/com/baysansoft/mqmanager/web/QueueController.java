@@ -2,6 +2,7 @@ package com.baysansoft.mqmanager.web;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,6 +16,7 @@ import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.messaging.MessagingOperations;
 import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
+import com.baysansoft.mqmanager.messaging.model.MessageQuery;
 import com.baysansoft.mqmanager.messaging.model.MessageType;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
@@ -47,11 +49,24 @@ public class QueueController {
         this.messaging = messaging;
     }
 
+    /**
+     * @param limit         how many messages to return (0 for the configured default)
+     * @param contains      optional: only messages whose body contains this text (a server-side scan on
+     *                      Kafka; ignored by providers that cannot search server-side)
+     * @param since         optional: start reading at the first message at or after this epoch-millis
+     *                      instant, so a search can skip straight past old records
+     * @param caseSensitive match {@code contains} exactly rather than case-insensitively
+     */
     @GetMapping("/messages")
     public BrowseResult browse(@PathVariable Long id,
                                @RequestParam String queueName,
-                               @RequestParam(required = false, defaultValue = "0") int limit) {
-        return messaging.browse(profile(id), requireQueueName(queueName), limit);
+                               @RequestParam(required = false, defaultValue = "0") int limit,
+                               @RequestParam(required = false) String contains,
+                               @RequestParam(required = false) Long since,
+                               @RequestParam(required = false, defaultValue = "false") boolean caseSensitive) {
+        MessageQuery query = new MessageQuery(
+                StringUtils.hasText(contains) ? contains.trim() : null, since, caseSensitive);
+        return messaging.browse(profile(id), requireQueueName(queueName), limit, query);
     }
 
     /** Full body and all headers for one message, for the expanded row. Non-destructive. */

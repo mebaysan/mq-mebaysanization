@@ -137,6 +137,10 @@ public class MqManagerProperties {
         private Duration pollTimeout = Duration.ofSeconds(1);
         /** Overall wall-clock bound on a browse, however many polls it takes. */
         private Duration browseTimeout = Duration.ofSeconds(15);
+        /** Overall wall-clock bound on a content search, which scans far more records than a browse. */
+        private Duration searchTimeout = Duration.ofSeconds(20);
+        /** How many records a single content search will read before it stops and says how far it got. */
+        private int searchScanLimit = 200_000;
         /** How long a client may block while shutting down before it is abandoned. */
         private Duration closeTimeout = Duration.ofSeconds(2);
         /** Sent as {@code client.id}; the Kafka analogue of IBM MQ's application tag. */
@@ -164,6 +168,22 @@ public class MqManagerProperties {
 
         public void setBrowseTimeout(Duration browseTimeout) {
             this.browseTimeout = browseTimeout;
+        }
+
+        public Duration getSearchTimeout() {
+            return searchTimeout;
+        }
+
+        public void setSearchTimeout(Duration searchTimeout) {
+            this.searchTimeout = searchTimeout;
+        }
+
+        public int getSearchScanLimit() {
+            return searchScanLimit;
+        }
+
+        public void setSearchScanLimit(int searchScanLimit) {
+            this.searchScanLimit = searchScanLimit;
         }
 
         public Duration getCloseTimeout() {

@@ -2,6 +2,7 @@ package com.baysansoft.mqmanager.kafka;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -24,6 +25,7 @@ import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -57,6 +59,7 @@ import com.baysansoft.mqmanager.messaging.model.DestinationEntry;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 import com.baysansoft.mqmanager.messaging.model.DestinationListings;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
+import com.baysansoft.mqmanager.messaging.model.MessageQuery;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
@@ -189,40 +192,86 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
 
     @Override
     public BrowseResult browse(ConnectionProfile profile, String topic, int limit) {
-        int effectiveLimit = clampLimit(limit);
-        int previewBytes = properties.getBrowse().getPreviewBytes();
+        return browse(profile, topic, limit, MessageQuery.NONE);
+    }
 
-        List<QueueMessageView> messages = withConsumer(profile, "browse the topic", consumer -> {
+    /**
+     * Browse, or search. With a plain {@link MessageQuery#NONE} it takes the first N records from the
+     * start, exactly as a browse always did. Given a substring and/or a start time it instead scans —
+     * seeking by time if asked, then reading up to the search scan cap or time budget, keeping only the
+     * records that match. Either way it records how far it got, so an empty result reports why (reached
+     * the end, or stopped at a cap) rather than silently reading as "nothing on the topic".
+     */
+    @Override
+    public BrowseResult browse(ConnectionProfile profile, String topic, int limit, MessageQuery query) {
+        int matchLimit = clampLimit(limit);
+        int previewBytes = properties.getBrowse().getPreviewBytes();
+        boolean search = query.isSearch();
+        int scanCap = search ? properties.getKafka().getSearchScanLimit() : matchLimit;
+        Duration budget = search
+                ? properties.getKafka().getSearchTimeout()
+                : properties.getKafka().getBrowseTimeout();
+        String needle = query.needle();
+
+        long[] scannedHolder = {0L};
+        String[] reasonHolder = {"END"};
+
+        List<QueueMessageView> messages = withConsumer(profile,
+                search ? "search the topic" : "browse the topic", consumer -> {
             List<TopicPartition> partitions = assignAllPartitions(consumer, topic);
-            consumer.seekToBeginning(partitions);
+            seekStart(consumer, partitions, query.sinceEpochMs());
 
             Map<TopicPartition, Long> ends = consumer.endOffsets(partitions, apiTimeout());
             List<QueueMessageView> collected = new ArrayList<>();
-            long deadline = System.nanoTime() + properties.getKafka().getBrowseTimeout().toNanos();
+            long deadline = System.nanoTime() + budget.toNanos();
+            long scanned = 0;
 
-            // The loop stops on the watermarks, never on an empty poll. A real consumer routinely
-            // returns nothing from its first poll or two while fetches are still in flight, and
-            // treating that as "the topic is empty" would report zero messages for a topic that has
-            // plenty. An empty topic costs nothing anyway: its positions already equal its end
-            // offsets, so the loop body never runs.
-            while (collected.size() < effectiveLimit
-                    && !allPartitionsDrained(consumer, partitions, ends)
-                    && System.nanoTime() < deadline) {
+            // The loop stops on the watermarks, a cap or the deadline — never on an empty poll. A real
+            // consumer routinely returns nothing from its first poll or two while fetches are in flight,
+            // and treating that as "empty" would report zero for a topic with plenty. An empty/exhausted
+            // topic costs nothing: positions already equal end offsets, so the body never runs.
+            while (true) {
+                if (collected.size() >= matchLimit) {
+                    reasonHolder[0] = "MATCH_CAP";
+                    break;
+                }
+                if (scanned >= scanCap) {
+                    reasonHolder[0] = "SCAN_CAP";
+                    break;
+                }
+                if (allPartitionsDrained(consumer, partitions, ends)) {
+                    reasonHolder[0] = "END";
+                    break;
+                }
+                if (System.nanoTime() >= deadline) {
+                    reasonHolder[0] = "TIME_CAP";
+                    break;
+                }
                 ConsumerRecords<String, byte[]> polled = consumer.poll(pollTimeout());
                 for (ConsumerRecord<String, byte[]> record : polled) {
-                    if (collected.size() >= effectiveLimit) {
+                    scanned++;
+                    if (matches(record, needle, query.caseSensitive())) {
+                        collected.add(recordMapper.toView(record, previewBytes));
+                        if (collected.size() >= matchLimit) {
+                            break;
+                        }
+                    }
+                    if (scanned >= scanCap) {
                         break;
                     }
-                    collected.add(recordMapper.toView(record, previewBytes));
                 }
             }
             // Never commitSync/commitAsync. Together with having no group id, this is what makes a
-            // browse provably invisible to real consumers.
+            // browse or a search provably invisible to real consumers.
+            scannedHolder[0] = scanned;
             return collected;
         });
 
-        return new BrowseResult(messages, messages.size(), effectiveLimit,
-                messages.size() >= effectiveLimit, browseNote());
+        boolean truncated = !"END".equals(reasonHolder[0]);
+        String note = search
+                ? searchNote(scannedHolder[0], messages.size(), query, reasonHolder[0])
+                : browseNote();
+        return new BrowseResult(messages, messages.size(), matchLimit, truncated, note);
     }
 
     @Override
@@ -589,6 +638,61 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
         return new MqOperationException("MESSAGE_NOT_FOUND", HttpStatus.NOT_FOUND,
                 "No record at offset " + id.offset() + " of partition " + id.partition() + " — "
                         + because + ".");
+    }
+
+    /** Positions the assigned partitions: at the beginning, or at the first record at/after a time. */
+    private void seekStart(Consumer<String, byte[]> consumer, List<TopicPartition> partitions,
+            Long sinceEpochMs) {
+        if (sinceEpochMs == null) {
+            consumer.seekToBeginning(partitions);
+            return;
+        }
+        Map<TopicPartition, Long> wanted = new HashMap<>();
+        for (TopicPartition partition : partitions) {
+            wanted.put(partition, sinceEpochMs);
+        }
+        Map<TopicPartition, OffsetAndTimestamp> offsets = consumer.offsetsForTimes(wanted, apiTimeout());
+        for (TopicPartition partition : partitions) {
+            OffsetAndTimestamp at = offsets.get(partition);
+            if (at != null) {
+                consumer.seek(partition, at.offset());
+            } else {
+                // No record at or after the requested time on this partition — nothing to read here.
+                consumer.seekToEnd(List.of(partition));
+            }
+        }
+    }
+
+    /** Whether a record's body contains the needle. A null needle matches everything (plain browse). */
+    private static boolean matches(ConsumerRecord<String, byte[]> record, String needle,
+            boolean caseSensitive) {
+        if (needle == null) {
+            return true;
+        }
+        byte[] value = record.value();
+        if (value == null) {
+            return false;
+        }
+        String text = new String(value, StandardCharsets.UTF_8);
+        return caseSensitive ? text.contains(needle) : text.toLowerCase().contains(needle);
+    }
+
+    private static String searchNote(long scanned, int matched, MessageQuery query, String reason) {
+        StringBuilder note = new StringBuilder("Searched ").append(scanned).append(" record(s)");
+        if (query.sinceEpochMs() != null) {
+            note.append(" from ").append(Instant.ofEpochMilli(query.sinceEpochMs()));
+        }
+        note.append("; ").append(matched).append(" matched. ");
+        note.append(switch (reason) {
+            case "MATCH_CAP" -> "Stopped at the result cap — there may be more matches; raise the load "
+                    + "count or narrow the text.";
+            case "SCAN_CAP" -> "Stopped at the scan cap — a match may be deeper in the topic; narrow it "
+                    + "with a start time or more specific text.";
+            case "TIME_CAP" -> "Stopped at the time budget — a match may be deeper in the topic; narrow "
+                    + "it with a start time or more specific text.";
+            default -> "Reached the end of the topic.";
+        });
+        return note.toString();
     }
 
     private static String browseNote() {

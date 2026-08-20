@@ -21,12 +21,25 @@ export function useDepth(id: number, queueName: string, enabled: boolean) {
   })
 }
 
-export function useMessages(id: number, queueName: string, limit: number, enabled: boolean) {
+export function useMessages(
+  id: number,
+  queueName: string,
+  limit: number,
+  enabled: boolean,
+  search?: { contains?: string; sinceMs?: number | null },
+) {
+  const contains = search?.contains?.trim() ?? ''
+  const sinceMs = search?.sinceMs ?? null
+  const extra: Record<string, string | number> = { limit }
+  if (contains !== '') extra.contains = contains
+  if (sinceMs != null) extra.since = sinceMs
   return useQuery({
-    queryKey: queryKeys.messages(id, queueName, limit),
+    queryKey: queryKeys.messages(id, queueName, limit, contains, sinceMs ?? 0),
     queryFn: () =>
-      api.get<BrowseResult>(`/api/connections/${id}/queue/messages?${queueQuery(queueName, { limit })}`),
+      api.get<BrowseResult>(`/api/connections/${id}/queue/messages?${queueQuery(queueName, extra)}`),
     enabled,
+    // A content search reads the broker for real (up to seconds); do not re-run it on window focus etc.
+    staleTime: 30_000,
   })
 }
 

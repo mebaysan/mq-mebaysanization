@@ -6,8 +6,8 @@ export const queryKeys = {
   connections: ['connections'] as const,
   connection: (id: number) => ['connections', id] as const,
   queue: (id: number, queueName: string) => ['connections', id, 'queue', queueName] as const,
-  messages: (id: number, queueName: string, limit: number) =>
-    ['connections', id, 'queue', queueName, 'messages', limit] as const,
+  messages: (id: number, queueName: string, limit: number, contains = '', sinceMs = 0) =>
+    ['connections', id, 'queue', queueName, 'messages', limit, contains, sinceMs] as const,
   depth: (id: number, queueName: string) =>
     ['connections', id, 'queue', queueName, 'depth'] as const,
   message: (id: number, queueName: string, messageId: string) =>

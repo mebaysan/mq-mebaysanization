@@ -13,6 +13,7 @@ import {
   ErrorBanner,
   ProviderBadge,
   Skeleton,
+  buttonClass,
   dangerButtonClass,
   secondaryButtonClass,
 } from '../components/Primitives'
@@ -43,13 +44,22 @@ const TIME_OPTIONS: { label: string; minutes: number | null }[] = [
   { label: 'Last 24 hours', minutes: 1440 },
 ]
 
-/** Everything a text search should look through: id, body preview, and every header/property. */
+/** For the JMS fallback filter: id, body preview, and every header/property, lower-cased. */
 function searchableText(message: QueueMessage): string {
   const kv = (entries: Record<string, string>) =>
     Object.entries(entries)
       .map(([k, v]) => `${k} ${v}`)
       .join(' ')
   return `${message.messageId} ${message.body ?? ''} ${kv(message.headers)} ${kv(message.properties)}`.toLowerCase()
+}
+
+/** A Date as the value a <input type="datetime-local"> expects (local wall clock, minute precision). */
+function toLocalInput(at: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T` +
+    `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  )
 }
 
 export default function QueueExplorerPage() {
@@ -64,13 +74,19 @@ export default function QueueExplorerPage() {
   const connection = useConnection(connectionId)
   const hasQueue = activeQueue.trim() !== ''
 
-  // How many to read, and the two client-side filters over what came back.
+  // What to read: the count, an optional content search (committed on submit, since each search reads the
+  // broker for real), and an optional start time that lets a search skip straight past old records.
   const [limit, setLimit] = useState(BROWSE_LIMIT)
-  const [search, setSearch] = useState('')
-  const [timeMinutes, setTimeMinutes] = useState<number | null>(null)
+  const [searchInput, setSearchInput] = useState('')
+  const [committedContains, setCommittedContains] = useState('')
+  const [sinceMs, setSinceMs] = useState<number | null>(null)
+  const [sinceLocal, setSinceLocal] = useState('')
 
   const depth = useDepth(connectionId, activeQueue, hasQueue)
-  const messages = useMessages(connectionId, activeQueue, limit, hasQueue)
+  const messages = useMessages(connectionId, activeQueue, limit, hasQueue, {
+    contains: committedContains,
+    sinceMs,
+  })
   const purge = usePurgeQueue(connectionId, activeQueue)
   const deleteMessage = useDeleteMessage(connectionId, activeQueue)
 
@@ -79,24 +95,56 @@ export default function QueueExplorerPage() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
 
+  // Never null: a blank noun would render as a missing word rather than as a loading state.
+  const caveats = connection.data ? PROVIDER_CAVEATS[connection.data.provider] : DEFAULT_CAVEAT
+
+  // Kafka searches server-side (over the full body, across the whole topic). Providers that ignore the
+  // query get the same search applied client-side over the page they returned, so the box is never inert.
+  const serverSearches = connection.data?.provider === 'KAFKA'
   const loadedMessages = messages.data?.messages
   const visibleMessages = useMemo(() => {
     const all = loadedMessages ?? []
-    const needle = search.trim().toLowerCase()
-    // Date.now() at filter time is fine here: this only sifts already-loaded rows, it triggers no fetch.
-    const cutoff = timeMinutes != null ? Date.now() - timeMinutes * 60_000 : null
+    if (serverSearches) return all
+    const needle = committedContains.trim().toLowerCase()
     return all.filter((message) => {
       if (needle && !searchableText(message).includes(needle)) return false
-      if (cutoff != null) {
+      if (sinceMs != null) {
         const at = message.enqueueTime ? new Date(message.enqueueTime).getTime() : Number.NaN
-        if (Number.isNaN(at) || at < cutoff) return false
+        if (Number.isNaN(at) || at < sinceMs) return false
       }
       return true
     })
-  }, [loadedMessages, search, timeMinutes])
+  }, [loadedMessages, serverSearches, committedContains, sinceMs])
 
-  // Never null: a blank noun would render as a missing word rather than as a loading state.
-  const caveats = connection.data ? PROVIDER_CAVEATS[connection.data.provider] : DEFAULT_CAVEAT
+  const submitSearch = (event: React.FormEvent) => {
+    event.preventDefault()
+    setCommittedContains(searchInput.trim())
+  }
+  const applySincePreset = (minutes: number | null) => {
+    if (minutes == null) {
+      setSinceMs(null)
+      setSinceLocal('')
+      return
+    }
+    const at = new Date(Date.now() - minutes * 60_000)
+    setSinceMs(at.getTime())
+    setSinceLocal(toLocalInput(at))
+  }
+  const applySinceCustom = (value: string) => {
+    setSinceLocal(value)
+    if (value === '') {
+      setSinceMs(null)
+      return
+    }
+    const at = new Date(value).getTime()
+    setSinceMs(Number.isNaN(at) ? null : at)
+  }
+  const clearSearch = () => {
+    setSearchInput('')
+    setCommittedContains('')
+    applySincePreset(null)
+  }
+  const isSearching = committedContains !== '' || sinceMs != null
 
   const recordOpen = useRecordOpen(connectionId)
   // What the picker said this destination was, when it came from the picker. A typed name leaves this
@@ -287,55 +335,73 @@ export default function QueueExplorerPage() {
 
                 {messages.isPending && !messages.isError && <Skeleton rows={5} />}
 
-                {messages.data && messages.data.messages.length === 0 && (
-                  <EmptyState
-                    title={`No messages on this ${caveats.noun}`}
-                    body={caveats.emptyNote}
-                  />
-                )}
-
-                {messages.data && messages.data.messages.length > 0 && (
+                {messages.data && (
                   <div className="space-y-3">
-                    <div className={`flex flex-wrap items-center gap-2 p-2.5 ${cardClass}`}>
-                      <div className="relative min-w-[10rem] flex-1">
-                        <SearchIcon
-                          size={15}
-                          className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle"
-                        />
+                    <div className={`space-y-2 p-2.5 ${cardClass}`}>
+                      <form onSubmit={submitSearch} className="flex flex-wrap items-center gap-2">
+                        <div className="relative min-w-[12rem] flex-1">
+                          <SearchIcon
+                            size={15}
+                            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle"
+                          />
+                          <input
+                            className="w-full rounded-lg border border-line bg-surface py-1.5 pl-8 pr-3 text-sm text-fg placeholder:text-fg-subtle transition-[box-shadow,border-color] hover:border-fg-subtle focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15"
+                            value={searchInput}
+                            onChange={(event) => setSearchInput(event.target.value)}
+                            placeholder={`Search ${caveats.noun} content…`}
+                            aria-label="Search message content"
+                          />
+                        </div>
+                        <button type="submit" className={buttonClass} disabled={messages.isFetching}>
+                          {messages.isFetching ? 'Searching…' : 'Search'}
+                        </button>
+                        <select
+                          className={selectClass}
+                          value={limit}
+                          onChange={(event) => setLimit(Number(event.target.value))}
+                          aria-label="How many to load"
+                        >
+                          {LIMIT_OPTIONS.map((n) => (
+                            <option key={n} value={n}>
+                              Load {n}
+                            </option>
+                          ))}
+                        </select>
+                        {(isSearching || searchInput !== '') && (
+                          <button type="button" className={secondaryButtonClass} onClick={clearSearch}>
+                            Clear
+                          </button>
+                        )}
+                      </form>
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
+                        <span className="mr-0.5 font-medium">Since</span>
+                        {TIME_OPTIONS.map((option) => {
+                          const active = option.minutes == null && sinceMs == null
+                          return (
+                            <button
+                              key={option.label}
+                              type="button"
+                              onClick={() => applySincePreset(option.minutes)}
+                              aria-pressed={active}
+                              className={`rounded-lg border px-2 py-1 font-medium transition-colors ${
+                                active
+                                  ? 'border-brand-200 bg-brand-50 text-brand-700'
+                                  : 'border-line bg-surface text-fg-muted hover:bg-hover'
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
                         <input
-                          className="w-full rounded-lg border border-line bg-surface py-1.5 pl-8 pr-3 text-sm text-fg placeholder:text-fg-subtle transition-[box-shadow,border-color] hover:border-fg-subtle focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15"
-                          value={search}
-                          onChange={(event) => setSearch(event.target.value)}
-                          placeholder="Search message content…"
-                          aria-label="Search message content"
+                          type="datetime-local"
+                          step={60}
+                          value={sinceLocal}
+                          onChange={(event) => applySinceCustom(event.target.value)}
+                          className={`${selectClass} py-1`}
+                          aria-label="Custom start time"
                         />
                       </div>
-                      <select
-                        className={selectClass}
-                        value={timeMinutes ?? ''}
-                        onChange={(event) =>
-                          setTimeMinutes(event.target.value === '' ? null : Number(event.target.value))
-                        }
-                        aria-label="Time window"
-                      >
-                        {TIME_OPTIONS.map((option) => (
-                          <option key={option.label} value={option.minutes ?? ''}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className={selectClass}
-                        value={limit}
-                        onChange={(event) => setLimit(Number(event.target.value))}
-                        aria-label="How many to load"
-                      >
-                        {LIMIT_OPTIONS.map((n) => (
-                          <option key={n} value={n}>
-                            Load {n}
-                          </option>
-                        ))}
-                      </select>
                     </div>
 
                     {visibleMessages.length > 0 ? (
@@ -364,9 +430,11 @@ export default function QueueExplorerPage() {
                           </tbody>
                         </table>
                         <div className="border-t border-line bg-surface-2/70 px-3 py-2 text-xs text-fg-muted">
-                          Showing {visibleMessages.length} of {messages.data.returned} loaded message
-                          {messages.data.returned === 1 ? '' : 's'}
-                          {messages.data.truncated && ' — more may be waiting; raise the load count.'}
+                          {isSearching ? 'Found ' : 'Showing '}
+                          {visibleMessages.length} message{visibleMessages.length === 1 ? '' : 's'}
+                          {!isSearching &&
+                            messages.data.truncated &&
+                            ' — more may be waiting; raise the load count.'}
                           {messages.data.providerNote && (
                             <span className="ml-1 text-fg-subtle">{messages.data.providerNote}</span>
                           )}
@@ -374,8 +442,13 @@ export default function QueueExplorerPage() {
                       </div>
                     ) : (
                       <EmptyState
-                        title="No messages match"
-                        body="No loaded message matches the search and time filter. Clear them, widen the time window, or raise the load count."
+                        title={isSearching ? 'No matches' : `No messages on this ${caveats.noun}`}
+                        body={
+                          isSearching
+                            ? (messages.data.providerNote ??
+                              'Nothing matched. Widen the time window, raise the load count, or change the text.')
+                            : caveats.emptyNote
+                        }
                       />
                     )}
                   </div>

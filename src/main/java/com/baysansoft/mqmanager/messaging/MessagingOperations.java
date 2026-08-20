@@ -13,6 +13,7 @@ import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
+import com.baysansoft.mqmanager.messaging.model.MessageQuery;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
@@ -74,6 +75,19 @@ public interface MessagingOperations {
     DestinationListing listDestinations(ConnectionProfile profile, DestinationQuery query);
 
     BrowseResult browse(ConnectionProfile profile, String queueName, int limit);
+
+    /**
+     * Browse with an optional server-side search — a substring the body must contain and/or a point in
+     * time to start from.
+     *
+     * <p>Default ignores the query and returns a plain first-N browse: a provider that cannot scan its
+     * destination server-side (the JMS providers here) simply behaves as before rather than pretending to
+     * have searched. Kafka overrides it to seek by time and scan for matches, reporting how far it got.
+     */
+    default BrowseResult browse(ConnectionProfile profile, String queueName, int limit,
+            MessageQuery query) {
+        return browse(profile, queueName, limit);
+    }
 
     /** Non-destructive fetch of one message, used to show a full body the list view had to truncate. */
     QueueMessageView browseOne(ConnectionProfile profile, String queueName, String messageId);

@@ -1,5 +1,7 @@
 server:
-  port: ${MQMANAGER_PORT:8080}
+  # An uncommon default (derived from 8080) so it does not clash with the usual local dev ports
+  # (8080/3000/5173/9000). Override with the MQMANAGER_PORT env var or -DMQMANAGER_PORT if needed.
+  port: ${MQMANAGER_PORT:48080}
 
 mqmanager:
   # Holds the H2 database file and the generated encryption key. Created on startup if missing.
