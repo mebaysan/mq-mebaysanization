@@ -158,6 +158,26 @@ export interface SendMessageResult {
   messageId: string
 }
 
+/**
+ * A request to create one topic. Kafka only — the JMS providers refuse it with a 501, so the UI only
+ * ever offers it for a Kafka connection.
+ */
+export interface CreateTopicRequest {
+  name: string
+  partitions: number
+  replicationFactor: number
+  configs: Record<string, string>
+}
+
+export interface CreateTopicResult {
+  name: string
+  partitions: number
+  replicationFactor: number
+  message: string
+  /** Provider-specific caveat, shown after the headline. */
+  note: string | null
+}
+
 export type LogLevel = 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
 
 export interface LogEntry {

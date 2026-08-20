@@ -5,10 +5,13 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+
+import org.springframework.http.MediaType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +27,8 @@ import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.domain.DestinationKind;
 import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.messaging.MessagingOperations;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicCommand;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationEntry;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
@@ -144,5 +149,67 @@ class DestinationControllerTest {
         mockMvc.perform(get("/api/connections/99/destinations"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("CONNECTION_NOT_FOUND"));
+    }
+
+    // ---------------------------------------------------------------- create topic
+
+    @Test
+    @DisplayName("creating a topic is a 201, and every field reaches the messaging layer as given")
+    void createReturnsCreatedAndPassesFieldsThrough() throws Exception {
+        when(messaging.createTopic(any(), any())).thenReturn(new CreateTopicOutcome("orders", 6,
+                (short) 3, "a note"));
+
+        mockMvc.perform(post("/api/connections/1/destinations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"orders","partitions":6,"replicationFactor":3,
+                                 "configs":{"retention.ms":"604800000"}}"""))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value("orders"))
+                .andExpect(jsonPath("$.partitions").value(6))
+                .andExpect(jsonPath("$.replicationFactor").value(3))
+                .andExpect(jsonPath("$.message").value(
+                        org.hamcrest.Matchers.containsString("Created topic orders")))
+                .andExpect(jsonPath("$.note").value("a note"));
+
+        ArgumentCaptor<CreateTopicCommand> command = ArgumentCaptor.forClass(CreateTopicCommand.class);
+        verify(messaging).createTopic(any(), command.capture());
+        org.assertj.core.api.Assertions.assertThat(command.getValue().name()).isEqualTo("orders");
+        org.assertj.core.api.Assertions.assertThat(command.getValue().partitions()).isEqualTo(6);
+        org.assertj.core.api.Assertions.assertThat(command.getValue().replicationFactor())
+                .isEqualTo((short) 3);
+        org.assertj.core.api.Assertions.assertThat(command.getValue().configs())
+                .containsEntry("retention.ms", "604800000");
+    }
+
+    @Test
+    @DisplayName("a blank name is a 400 from validation, before the messaging layer is ever called")
+    void blankNameIsRejected() throws Exception {
+        mockMvc.perform(post("/api/connections/1/destinations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"  \",\"partitions\":1,\"replicationFactor\":1}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("a partition count below one is a 400, since an omitted primitive arrives as zero")
+    void zeroPartitionsIsRejected() throws Exception {
+        mockMvc.perform(post("/api/connections/1/destinations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"orders\",\"partitions\":0,\"replicationFactor\":1}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("a provider that cannot create a topic surfaces the messaging layer's 501 unchanged")
+    void providerRefusalIsNotImplemented() throws Exception {
+        when(messaging.createTopic(any(), any())).thenThrow(new MqOperationException(
+                "OPERATION_NOT_SUPPORTED", HttpStatus.NOT_IMPLEMENTED, "Only Kafka creates topics."));
+
+        mockMvc.perform(post("/api/connections/1/destinations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"orders\",\"partitions\":1,\"replicationFactor\":1}"))
+                .andExpect(status().isNotImplemented())
+                .andExpect(jsonPath("$.code").value("OPERATION_NOT_SUPPORTED"));
     }
 }

@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import { useRef, useState } from 'react'
 
 import { ApiError } from '../api/client'
 import { useClearLogs, useLogs } from '../api/logs'
 import type { LogEntry, LogLevel, LogSort } from '../api/types'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import {
+  cardClass,
   EmptyState,
   ErrorBanner,
   Skeleton,
@@ -28,11 +30,11 @@ const PRESETS: { label: string; minutes: number | 'today' | null }[] = [
 
 /** Severity carries most of the meaning on this page, so it is the only thing that gets colour. */
 const LEVEL_STYLES: Record<LogLevel, string> = {
-  TRACE: 'bg-slate-100 text-slate-600 ring-slate-200',
-  DEBUG: 'bg-slate-100 text-slate-700 ring-slate-200',
+  TRACE: 'bg-surface-2 text-fg-muted ring-line',
+  DEBUG: 'bg-surface-2 text-fg-muted ring-line',
   INFO: 'bg-sky-100 text-sky-800 ring-sky-200',
-  WARN: 'bg-amber-100 text-amber-800 ring-amber-200',
-  ERROR: 'bg-rose-100 text-rose-800 ring-rose-200',
+  WARN: 'bg-amber-100 text-amber-800 dark:text-amber-200 ring-amber-200',
+  ERROR: 'bg-rose-100 text-rose-800 dark:text-rose-200 ring-rose-200',
 }
 
 /**
@@ -84,30 +86,35 @@ function instantToLocalInput(at: Date): string {
   )
 }
 
+/**
+ * Column template shared by the header and every row, so a div-based virtualized list still lines up
+ * like a table. Fixed widths for the three narrow columns; the message takes the rest and may wrap.
+ */
+const LOG_GRID = 'grid grid-cols-[7.5rem_4.5rem_11rem_minmax(0,1fr)] gap-x-3'
+
 function LogRow({ entry }: { entry: LogEntry }) {
   const [expanded, setExpanded] = useState(false)
   const hasTrace = entry.stackTrace !== null
 
+  // A div, not a table row: the virtualizer positions each of these absolutely and measures its real
+  // height (a wrapped message, or an opened stack trace), which a <tr> cannot be made to do.
   return (
-    <>
-      <tr className="align-top hover:bg-slate-50">
-        <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs text-slate-500">
+    <div className="border-b border-line/70">
+      <div className={`${LOG_GRID} px-3 py-1.5 hover:bg-hover/60`}>
+        <div className="whitespace-nowrap font-mono text-xs text-fg-subtle">
           {formatTime(entry.timestamp)}
-        </td>
-        <td className="px-3 py-1.5">
+        </div>
+        <div>
           <span
             className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${LEVEL_STYLES[entry.level]}`}
           >
             {entry.level}
           </span>
-        </td>
-        <td
-          className="max-w-[16rem] truncate px-3 py-1.5 font-mono text-xs text-slate-600"
-          title={entry.logger}
-        >
+        </div>
+        <div className="truncate font-mono text-xs text-fg-muted" title={entry.logger}>
           {entry.logger}
-        </td>
-        <td className="px-3 py-1.5 text-sm text-slate-800">
+        </div>
+        <div className="min-w-0 text-sm text-fg">
           <span className="whitespace-pre-wrap break-words">{entry.message}</span>
           {hasTrace && (
             <button
@@ -119,19 +126,17 @@ function LogRow({ entry }: { entry: LogEntry }) {
               {expanded ? 'hide stack trace' : 'stack trace'}
             </button>
           )}
-          <span className="mt-0.5 block font-mono text-[11px] text-slate-400">{entry.thread}</span>
-        </td>
-      </tr>
+          <span className="mt-0.5 block font-mono text-[11px] text-fg-subtle">{entry.thread}</span>
+        </div>
+      </div>
       {expanded && hasTrace && (
-        <tr className="bg-slate-50/70">
-          <td colSpan={4} className="px-3 pb-3 pt-0">
-            <pre className="max-h-80 overflow-auto rounded-lg border border-slate-200 bg-white p-3 font-mono text-[11px] leading-5 text-slate-700">
-              {entry.stackTrace}
-            </pre>
-          </td>
-        </tr>
+        <div className="bg-surface-2/70 px-3 pb-3 pt-0">
+          <pre className="max-h-80 overflow-auto rounded-lg border border-line bg-surface p-3 font-mono text-[11px] leading-5 text-fg-muted">
+            {entry.stackTrace}
+          </pre>
+        </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -168,6 +173,19 @@ export default function LogsPage() {
   const snapshot = logs.data
   const hasFilter = query.trim() !== '' || fromInput !== '' || toInput !== ''
 
+  // Virtualize the list: only the rows in view (plus a small overscan) are ever in the DOM, so 300
+  // lines — many of them multi-line — stay cheap to render and smooth to scroll. Heights are measured,
+  // not assumed, so a wrapped message or an opened stack trace pushes the rows below it correctly.
+  const entries = snapshot?.entries ?? []
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 40,
+    overscan: 12,
+    getItemKey: (index) => entries[index].sequence,
+  })
+
   const applyPreset = (minutes: number | 'today' | null) => {
     setToInput('')
     if (minutes === null) {
@@ -199,8 +217,8 @@ export default function LogsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">Logs</h1>
-        <p className="mt-1 max-w-3xl text-sm text-slate-600">
+        <h1 className="text-xl font-semibold text-fg">Logs</h1>
+        <p className="mt-1 max-w-3xl text-sm text-fg-muted">
           The most recent log lines from this process, held in memory. This is a live view for
           watching an operation as it happens — it is not an audit trail, and it is emptied on
           restart. Everything is also written to standard output, which is where anything permanent
@@ -208,7 +226,7 @@ export default function LogsPage() {
         </p>
       </div>
 
-      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <p className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
         This build has no login, so anyone who can reach this page can read these lines. Passwords are
         never logged, but hostnames and queue and topic names are — and message bodies are one log
         level away: <code className="font-mono text-xs">MQMANAGER_LOG_PAYLOADS</code> ships enabled, so
@@ -216,7 +234,7 @@ export default function LogsPage() {
         Set it to <code className="font-mono text-xs">false</code> to keep bodies out at any level.
       </p>
 
-      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+      <div className={`space-y-3 p-3 ${cardClass}`}>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1" role="group" aria-label="Minimum level">
             {LEVELS.map((option) => (
@@ -228,7 +246,7 @@ export default function LogsPage() {
                 className={`rounded-lg px-2 py-1 text-xs font-medium ${
                   level === option
                     ? 'bg-brand-600 text-white'
-                    : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                    : 'border border-line bg-surface text-fg-muted hover:bg-hover'
                 }`}
               >
                 {option}
@@ -246,7 +264,7 @@ export default function LogsPage() {
 
           <label
             className={`flex items-center gap-2 text-sm ${
-              canBeLive ? 'text-slate-700' : 'cursor-not-allowed text-slate-400'
+              canBeLive ? 'text-fg-muted' : 'cursor-not-allowed text-fg-subtle'
             }`}
             title={
               canBeLive
@@ -259,7 +277,7 @@ export default function LogsPage() {
               checked={live}
               disabled={!canBeLive}
               onChange={(event) => setLiveWanted(event.target.checked)}
-              className="rounded border-slate-300"
+              className="rounded border-line"
             />
             Live
           </label>
@@ -283,8 +301,8 @@ export default function LogsPage() {
           </button>
         </div>
 
-        <div className="flex flex-wrap items-end gap-3 border-t border-slate-100 pt-3">
-          <label className="text-xs font-medium text-slate-600">
+        <div className="flex flex-wrap items-end gap-3 border-t border-line pt-3">
+          <label className="text-xs font-medium text-fg-muted">
             From
             <input
               type="datetime-local"
@@ -295,7 +313,7 @@ export default function LogsPage() {
             />
           </label>
 
-          <label className="text-xs font-medium text-slate-600">
+          <label className="text-xs font-medium text-fg-muted">
             To
             <input
               type="datetime-local"
@@ -312,14 +330,14 @@ export default function LogsPage() {
                 key={preset.label}
                 type="button"
                 onClick={() => applyPreset(preset.minutes)}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                className="rounded-lg border border-line bg-surface px-2 py-1 text-xs font-medium text-fg-muted hover:bg-hover"
               >
                 {preset.label}
               </button>
             ))}
           </div>
 
-          <p className="pb-1 text-xs text-slate-500">
+          <p className="pb-1 text-xs text-fg-subtle">
             Local time. The end bound includes the whole second.
           </p>
         </div>
@@ -349,65 +367,72 @@ export default function LogsPage() {
       )}
 
       {snapshot && snapshot.entries.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="max-h-[34rem] overflow-auto">
-            <table className="w-full text-left">
-              <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th
-                    className="px-3 py-2 font-medium"
-                    aria-sort={sort === 'OLDEST_FIRST' ? 'ascending' : 'descending'}
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSort((current) =>
-                          current === 'NEWEST_FIRST' ? 'OLDEST_FIRST' : 'NEWEST_FIRST',
-                        )
-                      }
-                      className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-slate-700"
-                      title="Change the order these lines are shown in"
-                    >
-                      Time
-                      <span aria-hidden="true">{sort === 'NEWEST_FIRST' ? '↓' : '↑'}</span>
-                    </button>
-                  </th>
-                  <th className="px-3 py-2 font-medium">Level</th>
-                  <th className="px-3 py-2 font-medium">Logger</th>
-                  <th className="px-3 py-2 font-medium">Message</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {snapshot.entries.map((entry) => (
-                  <LogRow key={entry.sequence} entry={entry} />
-                ))}
-              </tbody>
-            </table>
+        <div className={`overflow-hidden ${cardClass}`}>
+          <div
+            className={`${LOG_GRID} border-b border-line bg-surface-2 px-3 py-2 text-xs font-medium uppercase tracking-wide text-fg-subtle`}
+          >
+            <button
+              type="button"
+              onClick={() =>
+                setSort((current) =>
+                  current === 'NEWEST_FIRST' ? 'OLDEST_FIRST' : 'NEWEST_FIRST',
+                )
+              }
+              aria-sort={sort === 'OLDEST_FIRST' ? 'ascending' : 'descending'}
+              className="inline-flex items-center gap-1 justify-self-start uppercase tracking-wide hover:text-fg-muted"
+              title="Change the order these lines are shown in"
+            >
+              Time
+              <span aria-hidden="true">{sort === 'NEWEST_FIRST' ? '↓' : '↑'}</span>
+            </button>
+            <div>Level</div>
+            <div>Logger</div>
+            <div>Message</div>
           </div>
-          <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <div ref={scrollRef} className="max-h-[34rem] overflow-auto">
+            <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }}>
+              {virtualizer.getVirtualItems().map((item) => (
+                <div
+                  key={item.key}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${item.start}px)`,
+                  }}
+                >
+                  <LogRow entry={entries[item.index]} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="border-t border-line bg-surface-2 px-3 py-2 text-xs text-fg-muted">
             {snapshot.order === 'NEWEST_FIRST' ? 'Newest first.' : 'Oldest first.'} Showing{' '}
             {snapshot.entries.length} of {snapshot.held} line{snapshot.held === 1 ? '' : 's'} held, out
             of a {snapshot.capacity} capacity.
             {/* Without this, an oldest-first page starting at 10:03:11 would read as "nothing
                 happened before then" rather than "we stopped looking there". */}
             {snapshot.windowTruncated && (
-              <span className="ml-1 text-amber-700">
+              <span className="ml-1 text-amber-700 dark:text-amber-300">
                 These are the {snapshot.entries.length} most recent matching lines; older lines inside
                 this range are not shown. Narrow the range to see them.
               </span>
             )}
             {snapshot.dropped > 0 && (
-              <span className="ml-1 text-amber-700">
+              <span className="ml-1 text-amber-700 dark:text-amber-300">
                 {snapshot.dropped} older line{snapshot.dropped === 1 ? ' has' : 's have'} been
                 dropped — this is not the whole history.
               </span>
             )}
             {!canBeLive && (
-              <span className="ml-1 text-slate-500">
+              <span className="ml-1 text-fg-subtle">
                 Paused: an end time is set, so no new line can enter this range.
               </span>
             )}
-            {live && <span className="ml-1 text-slate-500">Refreshing every {REFRESH_MS / 1000}s.</span>}
+            {live && <span className="ml-1 text-fg-subtle">Refreshing every {REFRESH_MS / 1000}s.</span>}
           </div>
         </div>
       )}

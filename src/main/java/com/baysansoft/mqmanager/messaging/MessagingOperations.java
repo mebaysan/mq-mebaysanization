@@ -2,9 +2,13 @@ package com.baysansoft.mqmanager.messaging;
 
 import java.util.Map;
 
+import org.springframework.http.HttpStatus;
+
 import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.ConnectionTestResult;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicCommand;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicOutcome;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
@@ -12,6 +16,7 @@ import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
 import com.baysansoft.mqmanager.messaging.model.OutboundMessage;
 import com.baysansoft.mqmanager.messaging.model.PurgeOutcome;
 import com.baysansoft.mqmanager.messaging.model.QueueMessageView;
+import com.baysansoft.mqmanager.web.MqOperationException;
 
 /**
  * Every queue operation the tool performs, written once and shared by every provider.
@@ -78,6 +83,22 @@ public interface MessagingOperations {
     DeleteOutcome deleteMessageDetailed(ConnectionProfile profile, String queueName, String messageId);
 
     DepthOutcome depthDetailed(ConnectionProfile profile, String queueName);
+
+    /**
+     * Creates a destination as an explicit administrative operation.
+     *
+     * <p>A default that refuses, not an abstract method, on purpose: only Kafka has an admin API that
+     * creates a topic on request, and the three JMS providers should stay exactly as they are rather
+     * than grow a method they cannot implement. The JMS brokers create a queue silently on first send
+     * (ActiveMQ, Artemis) or not at all (IBM MQ) — neither is this operation, and a caller that reaches
+     * one here gets an honest refusal instead of a create that quietly did nothing. Kafka overrides it.
+     */
+    default CreateTopicOutcome createTopic(ConnectionProfile profile, CreateTopicCommand command) {
+        throw new MqOperationException("OPERATION_NOT_SUPPORTED", HttpStatus.NOT_IMPLEMENTED,
+                "Creating a destination on request is a Kafka operation. The JMS providers either create "
+                        + "a queue on first use or not at all, so there is nothing here to create "
+                        + "explicitly.");
+    }
 
     default long purge(ConnectionProfile profile, String queueName) {
         return purgeDetailed(profile, queueName).purged();
