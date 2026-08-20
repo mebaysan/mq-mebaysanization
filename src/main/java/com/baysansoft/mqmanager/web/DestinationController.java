@@ -1,17 +1,26 @@
 package com.baysansoft.mqmanager.web;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.baysansoft.mqmanager.domain.DestinationKind;
 import com.baysansoft.mqmanager.messaging.MessagingOperations;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationQuery;
 import com.baysansoft.mqmanager.service.ConnectionProfileService;
+import com.baysansoft.mqmanager.web.dto.CreateTopicRequest;
+import com.baysansoft.mqmanager.web.dto.DestinationResponses.CreateTopicResponse;
 import com.baysansoft.mqmanager.web.dto.DestinationResponses.DestinationListResponse;
+
+import jakarta.validation.Valid;
 
 /**
  * What destinations a saved connection's broker has.
@@ -55,5 +64,20 @@ public class DestinationController {
                 StringUtils.hasText(prefix) ? prefix.trim() : null,
                 limit);
         return DestinationListResponse.from(messaging.listDestinations(profiles.require(id), query));
+    }
+
+    /**
+     * Creates a destination on the broker.
+     *
+     * <p>A 201 on success. Only Kafka acts on this; the JMS providers refuse with a 501 from the
+     * messaging layer, so this endpoint stays free of any provider check — the same doctrine the rest of
+     * the controllers follow. The topic name rides in the JSON body, not the path, for the reason every
+     * name here does: it may contain a dot.
+     */
+    @PostMapping
+    public ResponseEntity<CreateTopicResponse> create(@PathVariable Long id,
+                                                      @Valid @RequestBody CreateTopicRequest request) {
+        CreateTopicOutcome outcome = messaging.createTopic(profiles.require(id), request.toCommand());
+        return ResponseEntity.status(HttpStatus.CREATED).body(CreateTopicResponse.from(outcome));
     }
 }

@@ -1,22 +1,210 @@
 @import "tailwindcss";
 
-/* Tailwind v4 CSS-first configuration. Defining --color-brand-* here automatically generates the
-   bg-brand-*, text-brand-*, border-brand-* utilities. There is no tailwind.config.js. */
+/* Tailwind v4 CSS-first configuration. Defining tokens here automatically generates the matching
+   utilities (bg-brand-*, font-mono, shadow-elevated, …). There is no tailwind.config.js.
+
+   Fonts are deliberately native stacks, not a webfont import: this app ships as one self-contained JAR
+   with no runtime network dependency, and reaching out to a font CDN would break that promise (and fail
+   offline). system-ui resolves to San Francisco / Segoe UI / Roboto — already modern — and the mono
+   stack to SF Mono / Cascadia / JetBrains Mono when present. */
 @theme {
-  --color-brand-50: oklch(0.97 0.014 254);
-  --color-brand-100: oklch(0.93 0.032 255);
-  --color-brand-200: oklch(0.88 0.059 254);
-  --color-brand-300: oklch(0.81 0.096 252);
-  --color-brand-400: oklch(0.71 0.143 255);
-  --color-brand-500: oklch(0.62 0.19 259);
-  --color-brand-600: oklch(0.55 0.21 262);
-  --color-brand-700: oklch(0.49 0.19 264);
-  --color-brand-800: oklch(0.42 0.16 266);
-  --color-brand-900: oklch(0.38 0.13 266);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", "Roboto Mono", Menlo,
+    Consolas, monospace;
+
+  /* Brand — a richer, "night indigo". Deepened chroma and a hue that sits a touch closer to the violet
+     accent, so the indigo→violet gradient reads as one family rather than two colours. */
+  --color-brand-50: oklch(0.972 0.014 275);
+  --color-brand-100: oklch(0.936 0.032 273);
+  --color-brand-200: oklch(0.882 0.06 271);
+  --color-brand-300: oklch(0.803 0.104 269);
+  --color-brand-400: oklch(0.702 0.164 268);
+  --color-brand-500: oklch(0.612 0.214 268);
+  --color-brand-600: oklch(0.542 0.238 268);
+  --color-brand-700: oklch(0.482 0.22 269);
+  --color-brand-800: oklch(0.418 0.18 270);
+  --color-brand-900: oklch(0.372 0.145 271);
+
+  /* Accent — "dream violet". Pairs with the indigo brand for gradients and drives the "this one is
+     selected" highlight. Distinct from the emerald that means Kafka and the rose that means danger, so
+     a coloured accent never collides with a status meaning. */
+  --color-accent-50: oklch(0.972 0.02 305);
+  --color-accent-100: oklch(0.944 0.042 303);
+  --color-accent-200: oklch(0.895 0.08 302);
+  --color-accent-300: oklch(0.822 0.132 301);
+  --color-accent-400: oklch(0.72 0.188 300);
+  --color-accent-500: oklch(0.62 0.236 300);
+  --color-accent-600: oklch(0.552 0.252 300);
+  --color-accent-700: oklch(0.496 0.226 300);
+  --color-accent-800: oklch(0.432 0.188 300);
+  --color-accent-900: oklch(0.382 0.156 300);
+
+  /* A softer, layered elevation than Tailwind's defaults — modern-minimal shadows are low-contrast and
+     tinted toward slate rather than pure black. */
+  --shadow-card: 0 1px 2px 0 oklch(0.2 0.03 265 / 0.04), 0 1px 3px 0 oklch(0.2 0.03 265 / 0.06);
+  --shadow-elevated: 0 4px 12px -2px oklch(0.2 0.03 265 / 0.08),
+    0 2px 6px -2px oklch(0.2 0.03 265 / 0.06);
+  --shadow-overlay: 0 24px 48px -12px oklch(0.15 0.03 265 / 0.28),
+    0 8px 24px -8px oklch(0.15 0.03 265 / 0.16);
+
+  /* Semantic surface/text/line tokens. These map onto CSS variables set below per colour scheme, so a
+     utility like bg-surface or text-fg-muted resolves to the right value in light and dark without the
+     call site knowing which. In light mode they equal the exact slate/white values used before, so the
+     light theme is unchanged; dark mode is a second set of values, chosen once, here. */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-line: var(--line);
+  --color-hover: var(--hover);
+}
+
+/* Dark styling follows the operating system. There is deliberately no toggle: this build stores no
+   client state (no localStorage anywhere, by project rule), and a switch that reset on every reload
+   would be worse than none. Tailwind v4's `dark:` variant already keys off prefers-color-scheme, and
+   the semantic tokens below swap on the same media query, so both approaches track the OS setting. */
+:root {
+  /* Light — neutrals carry a faint indigo tint (low chroma at the brand's hue) rather than plain grey,
+     so the whole surface feels of a piece with the brand. Cards stay pure white to lift off the page. */
+  --bg: oklch(0.985 0.006 275);
+  --surface: #ffffff;
+  --surface-2: oklch(0.972 0.009 274);
+  --fg: oklch(0.228 0.042 273);
+  --fg-muted: oklch(0.468 0.036 271);
+  --fg-subtle: oklch(0.578 0.03 270);
+  --line: oklch(0.918 0.017 272);
+  --hover: oklch(0.962 0.013 274);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Dark — a deep indigo-navy, not flat grey: the page is darkest, cards sit a step above, subtle
+       panels above those, so elevation reads without shadows. The faint brand hue keeps it warm rather
+       than clinical. */
+    --bg: oklch(0.188 0.028 271);
+    --surface: oklch(0.238 0.03 269);
+    --surface-2: oklch(0.288 0.032 268);
+    --fg: oklch(0.958 0.011 270);
+    --fg-muted: oklch(0.764 0.03 268);
+    --fg-subtle: oklch(0.652 0.032 267);
+    --line: oklch(0.338 0.036 266);
+    --hover: oklch(0.318 0.036 266);
+  }
 }
 
 html,
 body,
 #root {
   height: 100%;
+}
+
+body {
+  /* Crisper text everywhere. light dark tells the browser to theme form controls, scrollbars and the
+     like for whichever scheme is active. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: light dark;
+  background-color: var(--bg);
+  color: var(--fg);
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular, aligned figures for the data this tool is full of: offsets, depths, timestamps, message ids.
+   Proportional digits make columns of numbers jitter. */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background-color: oklch(0.612 0.214 268 / 0.2);
+}
+
+/* A consistent, quiet scrollbar so long log/message lists don't get a heavy native one. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--fg-subtle) 55%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: oklch(0.7 0.02 265 / 0.45);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: oklch(0.62 0.02 265 / 0.6);
+}
+
+/* Motion tokens — short, ease-out, meaningful. Entrances only; nothing loops. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes slide-up-fade {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* A quiet indigo→violet wash for page headers — colour without shouting. The grid overlay gives it a
+   faint "control surface" texture that suits an infrastructure tool. */
+.hero-surface {
+  /* The base sits on the surface token, so the wash rides on white in light and on the dark card in
+     dark; the coloured radials are low-alpha and read on both. */
+  background-color: var(--surface);
+  background-image:
+    radial-gradient(60rem 22rem at 8% -40%, oklch(0.62 0.236 300 / 0.18), transparent 60%),
+    radial-gradient(52rem 20rem at 92% -60%, oklch(0.612 0.214 268 / 0.2), transparent 55%);
+}
+.hero-grid {
+  background-image:
+    linear-gradient(color-mix(in oklch, var(--fg) 6%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--fg) 6%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.animate-fade-in {
+  animation: fade-in 160ms ease-out both;
+}
+.animate-scale-in {
+  animation: scale-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-slide-up {
+  animation: slide-up-fade 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Respect the user's motion preference: no entrances, no transitions worth the name. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

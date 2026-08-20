@@ -41,7 +41,7 @@ export function RecentDestinations({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Remembered</span>
+      <span className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Remembered</span>
       {entries.map((entry) => {
         const active = entry.name === activeName
         return (
@@ -50,7 +50,7 @@ export function RecentDestinations({
             className={`group inline-flex items-center gap-1 rounded-full border py-0.5 pl-2 pr-1 text-xs ${
               active
                 ? 'border-brand-300 bg-brand-50 text-brand-800'
-                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                : 'border-line bg-surface text-fg-muted hover:bg-hover'
             }`}
           >
             <button
@@ -67,7 +67,7 @@ export function RecentDestinations({
               onClick={() =>
                 pin.mutate({ name: entry.name, pinned: !entry.pinned }, { onError: report })
               }
-              className="rounded px-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+              className="rounded px-1 text-fg-subtle hover:bg-slate-200 hover:text-fg-muted"
               title={
                 entry.pinned
                   ? 'Unpin. It can then be evicted once the list is full.'
@@ -81,7 +81,7 @@ export function RecentDestinations({
             <button
               type="button"
               onClick={() => forget.mutate(entry.name, { onError: report })}
-              className="rounded px-1 text-slate-400 hover:bg-rose-100 hover:text-rose-700"
+              className="rounded px-1 text-fg-subtle hover:bg-rose-100 hover:text-rose-700"
               title="Forget this destination. Nothing on the broker changes."
               aria-label={`Forget ${entry.name}`}
             >

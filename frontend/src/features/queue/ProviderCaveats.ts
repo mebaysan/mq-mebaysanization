@@ -51,6 +51,12 @@ export interface ProviderCaveat {
   listNote: string
   /** False when this provider only ever has one kind of destination, which hides the kind filter. */
   listsTopics: boolean
+  /**
+   * True shows a "New topic" action that creates a destination through the broker's admin API. Kafka
+   * only: the JMS providers create a queue on first send or not at all, so there is nothing to create
+   * explicitly and the server refuses it with a 501.
+   */
+  canCreateTopic: boolean
 }
 
 export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
@@ -80,6 +86,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
       'that is indistinguishable from a broker with no destinations — so an empty answer is ' +
       'reported as "could not list", never as "there is nothing here".',
     listsTopics: true,
+    canCreateTopic: false,
   },
   ARTEMIS: {
     noun: 'queue',
@@ -105,6 +112,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
       'addresses and queues rather than JMS queues and topics: an address with a queue of the same ' +
       'name is shown as a queue, one without is shown as a topic.',
     listsTopics: true,
+    canCreateTopic: false,
   },
   IBM_MQ: {
     noun: 'queue',
@@ -129,6 +137,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
       'running (START CMDSERV) and +dsp authority on the queue manager. Topics listed are ' +
       'administrative topic objects, not topic strings, and SYSTEM.* objects are marked internal.',
     listsTopics: true,
+    canCreateTopic: false,
   },
   KAFKA: {
     noun: 'topic',
@@ -156,6 +165,7 @@ export const PROVIDER_CAVEATS: Record<Provider, ProviderCaveat> = {
       'on itself cannot be listed, though reading one named topic still works. Internal topics such ' +
       'as __consumer_offsets are marked as the broker reports them, not guessed at by name.',
     listsTopics: false,
+    canCreateTopic: true,
   },
 }
 

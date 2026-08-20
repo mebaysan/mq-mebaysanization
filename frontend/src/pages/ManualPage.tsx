@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 
 import type { Provider } from '../api/types'
-import { ProviderBadge } from '../components/Primitives'
+import { cardClass, ProviderBadge } from '../components/Primitives'
 import { PROVIDERS, PROVIDER_FIELDS } from '../features/connections/ProviderFields'
 import { PROVIDER_CAVEATS } from '../features/queue/ProviderCaveats'
 
@@ -35,8 +35,8 @@ const SECTIONS = [
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section id={id} className="scroll-mt-6">
-      <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-      <div className="mt-3 space-y-3 text-sm leading-6 text-slate-700">{children}</div>
+      <h2 className="text-base font-semibold text-fg">{title}</h2>
+      <div className="mt-3 space-y-3 text-sm leading-6 text-fg-muted">{children}</div>
     </section>
   )
 }
@@ -44,7 +44,7 @@ function Section({ id, title, children }: { id: string; title: string; children:
 /** A caveat that matters enough to interrupt reading for. */
 function Warn({ children }: { children: ReactNode }) {
   return (
-    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+    <p className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
       {children}
     </p>
   )
@@ -52,7 +52,7 @@ function Warn({ children }: { children: ReactNode }) {
 
 function Code({ children }: { children: ReactNode }) {
   return (
-    <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs text-slate-800">
+    <code className="rounded bg-surface-2 px-1 py-0.5 font-mono text-xs text-fg">
       {children}
     </code>
   )
@@ -60,9 +60,9 @@ function Code({ children }: { children: ReactNode }) {
 
 function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200">
+    <div className="overflow-x-auto rounded-xl border border-line">
       <table className="w-full text-left text-sm">
-        <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wide text-fg-subtle">
           <tr>
             {head.map((cell) => (
               <th key={cell} className="whitespace-nowrap px-3 py-2 font-medium">
@@ -71,18 +71,18 @@ function Table({ head, children }: { head: string[]; children: ReactNode }) {
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 align-top">{children}</tbody>
+        <tbody className="divide-y divide-line align-top">{children}</tbody>
       </table>
     </div>
   )
 }
 
 function Yes() {
-  return <span className="font-medium text-slate-800">yes</span>
+  return <span className="font-medium text-fg">yes</span>
 }
 
 function No() {
-  return <span className="text-slate-400">—</span>
+  return <span className="text-fg-subtle">—</span>
 }
 
 /** How a provider is addressed, derived rather than described. */
@@ -97,16 +97,16 @@ export default function ManualPage() {
   return (
     <div className="max-w-3xl space-y-8">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">Manual</h1>
-        <p className="mt-1 text-sm text-slate-600">
+        <h1 className="text-xl font-semibold text-fg">Manual</h1>
+        <p className="mt-1 text-sm text-fg-muted">
           What this tool does, in the order you will need it. Everything here applies to whichever
           broker you point it at; where the brokers genuinely differ, the difference is called out
           rather than smoothed over.
         </p>
       </div>
 
-      <nav aria-label="Contents" className="rounded-xl border border-slate-200 bg-white p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Contents</p>
+      <nav aria-label="Contents" className={`p-4 ${cardClass}`}>
+        <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Contents</p>
         <ol className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           {SECTIONS.map((section) => (
             <li key={section.id}>
@@ -199,7 +199,7 @@ export default function ManualPage() {
               <td className="px-3 py-2">
                 {PROVIDER_CAVEATS[provider].listsTopics ? 'Queues and topics' : 'Topics'}
               </td>
-              <td className="px-3 py-2 text-slate-600">{PROVIDER_CAVEATS[provider].listNote}</td>
+              <td className="px-3 py-2 text-fg-muted">{PROVIDER_CAVEATS[provider].listNote}</td>
             </tr>
           ))}
         </Table>
@@ -240,7 +240,7 @@ export default function ManualPage() {
                 <ProviderBadge provider={provider} label={PROVIDER_FIELDS[provider].label} />
               </td>
               <td className="px-3 py-2">{PROVIDER_CAVEATS[provider].Noun}</td>
-              <td className="px-3 py-2 text-slate-600">{PROVIDER_CAVEATS[provider].chooseNote}</td>
+              <td className="px-3 py-2 text-fg-muted">{PROVIDER_CAVEATS[provider].chooseNote}</td>
             </tr>
           ))}
         </Table>
@@ -299,7 +299,7 @@ export default function ManualPage() {
                   <ProviderBadge provider={provider} label={PROVIDER_FIELDS[provider].label} />
                 </td>
                 <td className="px-3 py-2 font-medium">{caveat.depthLabel}</td>
-                <td className="px-3 py-2 text-slate-600">
+                <td className="px-3 py-2 text-fg-muted">
                   {provider === 'KAFKA'
                     ? 'Records retained on the topic — not a backlog. Records consumers have already read still count until retention removes them.'
                     : 'Messages currently sitting on the queue, waiting to be consumed.'}
@@ -417,15 +417,15 @@ export default function ManualPage() {
                   <>
                     <Yes />
                     {PROVIDER_CAVEATS[provider].deleteNote && (
-                      <span className="mt-1 block text-xs text-slate-500">
+                      <span className="mt-1 block text-xs text-fg-subtle">
                         {PROVIDER_CAVEATS[provider].deleteNote}
                       </span>
                     )}
                   </>
                 ) : (
                   <>
-                    <span className="font-medium text-slate-800">not possible</span>
-                    <span className="mt-1 block text-xs text-slate-500">
+                    <span className="font-medium text-fg">not possible</span>
+                    <span className="mt-1 block text-xs text-fg-subtle">
                       A Kafka partition is an append-only log, so no single record can be removed from
                       it. The button is not shown at all rather than shown and always failing. Purge
                       is the only way to remove records.
@@ -566,9 +566,9 @@ export default function ManualPage() {
             ],
           ].map(([code, meaning, action]) => (
             <tr key={code}>
-              <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-800">{code}</td>
+              <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-fg">{code}</td>
               <td className="px-3 py-2">{meaning}</td>
-              <td className="px-3 py-2 text-slate-600">{action}</td>
+              <td className="px-3 py-2 text-fg-muted">{action}</td>
             </tr>
           ))}
         </Table>

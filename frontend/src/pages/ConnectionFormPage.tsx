@@ -5,6 +5,7 @@ import { ApiError } from '../api/client'
 import { useConnection, useSaveConnection, useTestDraft } from '../api/connections'
 import type { ConnectionProfileRequest, Provider } from '../api/types'
 import {
+  cardClass,
   ErrorBanner,
   Field,
   Skeleton,
@@ -130,7 +131,7 @@ export default function ConnectionFormPage() {
         <Link to="/connections" className="text-sm text-brand-700 hover:underline">
           ← Back to connections
         </Link>
-        <h1 className="mt-2 text-xl font-semibold text-slate-900">
+        <h1 className="mt-2 text-xl font-semibold text-fg">
           {isEdit ? `Edit ${existing.data?.name ?? 'connection'}` : 'New connection'}
         </h1>
       </div>
@@ -143,7 +144,7 @@ export default function ConnectionFormPage() {
         />
       )}
 
-      <form onSubmit={submit} className="space-y-5 rounded-xl border border-slate-200 bg-white p-5">
+      <form onSubmit={submit} className={`space-y-5 p-5 ${cardClass}`}>
         <Field label="Name">
           <input
             className={inputClass}
@@ -155,7 +156,7 @@ export default function ConnectionFormPage() {
         </Field>
 
         <fieldset>
-          <legend className="text-sm font-medium text-slate-700">Provider</legend>
+          <legend className="text-sm font-medium text-fg-muted">Provider</legend>
           <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {PROVIDERS.map((value) => (
               <label
@@ -163,7 +164,7 @@ export default function ConnectionFormPage() {
                 className={`cursor-pointer rounded-lg border p-3 text-sm ${
                   form.provider === value
                     ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-                    : 'border-slate-300 hover:bg-slate-50'
+                    : 'border-line hover:bg-hover'
                 }`}
               >
                 <input
@@ -173,10 +174,10 @@ export default function ConnectionFormPage() {
                   checked={form.provider === value}
                   onChange={() => changeProvider(value)}
                 />
-                <span className="block font-medium text-slate-900">
+                <span className="block font-medium text-fg">
                   {PROVIDER_FIELDS[value].label}
                 </span>
-                <span className="mt-1 block text-xs text-slate-500">
+                <span className="mt-1 block text-xs text-fg-subtle">
                   {PROVIDER_FIELDS[value].blurb}
                 </span>
               </label>
@@ -287,17 +288,17 @@ export default function ConnectionFormPage() {
         </div>
 
         {fields.credentialsNote && (
-          <p className="-mt-2 text-xs text-slate-500">{fields.credentialsNote}</p>
+          <p className="-mt-2 text-xs text-fg-subtle">{fields.credentialsNote}</p>
         )}
 
         {isEdit && existing.data && !existing.data.credentialsReadable && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/40 p-3 text-sm text-amber-900 dark:text-amber-200">
             The stored password cannot be decrypted with the current encryption key. Enter it again to
             repair this connection.
           </div>
         )}
 
-        <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+        <div className="flex items-center justify-between border-t border-line pt-4">
           <button
             type="button"
             className={secondaryButtonClass}

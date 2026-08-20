@@ -1,8 +1,13 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from './client'
 import { queryKeys } from './keys'
-import type { DestinationKind, DestinationListing } from './types'
+import type {
+  CreateTopicRequest,
+  CreateTopicResult,
+  DestinationKind,
+  DestinationListing,
+} from './types'
 
 /**
  * Asks a broker what destinations it has.
@@ -41,5 +46,19 @@ export function useDestinations(
     enabled,
     // One listing is one broker round trip. Re-opening the picker within the minute should not repeat it.
     staleTime: 60_000,
+  })
+}
+
+/**
+ * Creates a topic, then invalidates every cached listing for this connection so the new one shows up on
+ * the next browse without a manual refresh.
+ */
+export function useCreateTopic(id: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateTopicRequest) =>
+      api.post<CreateTopicResult>(`/api/connections/${id}/destinations`, body),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.destinationsRoot(id) }),
   })
 }

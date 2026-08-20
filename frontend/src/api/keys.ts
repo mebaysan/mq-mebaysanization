@@ -12,6 +12,8 @@ export const queryKeys = {
     ['connections', id, 'queue', queueName, 'depth'] as const,
   message: (id: number, queueName: string, messageId: string) =>
     ['connections', id, 'queue', queueName, 'message', messageId] as const,
+  /** Prefix over every kind/prefix listing, so creating a topic can invalidate them all at once. */
+  destinationsRoot: (id: number) => ['connections', id, 'destinations'] as const,
   /** Under the connection prefix, so deleting a connection clears its listing too. */
   destinations: (id: number, kind: string, prefix: string) =>
     ['connections', id, 'destinations', kind, prefix] as const,

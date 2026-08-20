@@ -1,12 +1,5 @@
-import { createContext, use, useCallback, useMemo, useState, type ReactNode } from 'react'
-
-type ToastKind = 'success' | 'error' | 'info'
-
-interface Toast {
-  id: number
-  kind: ToastKind
-  message: string
-}
+import type { ReactNode } from 'react'
+import { Toaster, toast } from 'sonner'
 
 interface ToastApi {
   success: (message: string) => void
@@ -14,74 +7,39 @@ interface ToastApi {
   info: (message: string) => void
 }
 
-const ToastContext = createContext<ToastApi | null>(null)
+/**
+ * Toasts, on Sonner.
+ *
+ * <p>The {@code useToast()} shape is kept exactly as it was — {@code success/error/info} — so every call
+ * site is unchanged; only the engine underneath swapped to Sonner, which brings stacking, swipe-to-
+ * dismiss, an accessible live region and a close button for free. Errors linger longer than the rest
+ * because they usually carry a broker message worth reading.
+ */
+const api: ToastApi = {
+  success: (message) => void toast.success(message),
+  error: (message) => void toast.error(message, { duration: 9000 }),
+  info: (message) => void toast.info(message),
+}
 
 export function useToast(): ToastApi {
-  const api = use(ToastContext)
-  if (!api) {
-    throw new Error('useToast must be used inside <ToastProvider>')
-  }
   return api
 }
 
-const STYLES: Record<ToastKind, string> = {
-  success: 'border-emerald-300 bg-emerald-50 text-emerald-900',
-  error: 'border-rose-300 bg-rose-50 text-rose-900',
-  info: 'border-slate-300 bg-white text-slate-800',
-}
-
-let nextId = 0
-
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([])
-
-  const dismiss = useCallback((id: number) => {
-    setToasts((current) => current.filter((toast) => toast.id !== id))
-  }, [])
-
-  const push = useCallback(
-    (kind: ToastKind, message: string) => {
-      const id = nextId++
-      setToasts((current) => [...current, { id, kind, message }])
-      // Errors stay longer: they usually carry a broker message worth reading.
-      window.setTimeout(() => dismiss(id), kind === 'error' ? 9000 : 4000)
-    },
-    [dismiss],
-  )
-
-  const api = useMemo<ToastApi>(
-    () => ({
-      success: (message) => push('success', message),
-      error: (message) => push('error', message),
-      info: (message) => push('info', message),
-    }),
-    [push],
-  )
-
   return (
-    <ToastContext value={api}>
+    <>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-full max-w-sm flex-col gap-2">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            role="status"
-            className={`pointer-events-auto rounded-lg border px-4 py-3 text-sm shadow-lg ${STYLES[toast.kind]}`}
-          >
-            <div className="flex items-start gap-3">
-              <span className="flex-1 whitespace-pre-wrap break-words">{toast.message}</span>
-              <button
-                type="button"
-                onClick={() => dismiss(toast.id)}
-                className="shrink-0 rounded px-1 text-slate-500 hover:text-slate-900"
-                aria-label="Dismiss"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </ToastContext>
+      <Toaster
+        position="bottom-right"
+        richColors
+        closeButton
+        // Follow the OS light/dark setting, the same signal the rest of the theme reads.
+        theme="system"
+        toastOptions={{
+          // Match the app's softer radius and elevation rather than Sonner's defaults.
+          className: 'rounded-xl',
+        }}
+      />
+    </>
   )
 }

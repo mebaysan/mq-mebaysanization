@@ -2,6 +2,7 @@ package com.baysansoft.mqmanager.web.dto;
 
 import java.util.List;
 
+import com.baysansoft.mqmanager.messaging.model.CreateTopicOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationEntry;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
 
@@ -57,6 +58,25 @@ public final class DestinationResponses {
                         + "policy rather than a problem with the connection, and typing a name still "
                         + "works.";
             };
+        }
+    }
+
+    /**
+     * The result of creating a topic, with one plain sentence stating what was made.
+     *
+     * <p>The values echoed back are the ones the broker accepted, so the sentence describes the created
+     * topic rather than the request. {@code note} stays separate for the same reason it does above: the
+     * headline and the provider-specific small print are two different things.
+     */
+    public record CreateTopicResponse(String name, int partitions, int replicationFactor, String message,
+            String note) {
+
+        public static CreateTopicResponse from(CreateTopicOutcome outcome) {
+            return new CreateTopicResponse(outcome.name(), outcome.partitions(),
+                    outcome.replicationFactor(),
+                    "Created topic " + outcome.name() + " with " + outcome.partitions()
+                            + " partition(s) and replication factor " + outcome.replicationFactor() + ".",
+                    outcome.note());
         }
     }
 }

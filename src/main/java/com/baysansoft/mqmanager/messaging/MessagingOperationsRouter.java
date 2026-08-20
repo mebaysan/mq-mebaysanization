@@ -11,6 +11,8 @@ import com.baysansoft.mqmanager.domain.ConnectionProfile;
 import com.baysansoft.mqmanager.domain.Provider;
 import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.ConnectionTestResult;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicCommand;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicOutcome;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationListing;
@@ -101,5 +103,10 @@ public class MessagingOperationsRouter implements MessagingOperations {
     @Override
     public DepthOutcome depthDetailed(ConnectionProfile profile, String queueName) {
         return forProfile(profile).depthDetailed(profile, queueName);
+    }
+
+    @Override
+    public CreateTopicOutcome createTopic(ConnectionProfile profile, CreateTopicCommand command) {
+        return forProfile(profile).createTopic(profile, command);
     }
 }

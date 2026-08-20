@@ -87,6 +87,11 @@ gets its clients from `KafkaClientFactory` (which returns *interfaces*, so tests
 `Provider` carries an `EnumSet<Capability>` with named accessors rather than positional booleans. Add a
 capability there rather than branching on the enum constant.
 
+`TargetClient` (`messaging/model`) is the pattern for a provider-specific send option: it controls the
+IBM MQ MQRFH2 header (JMS vs MQ target), is threaded through `OutboundMessage` and applied in
+`IbmMqConnectionFactoryBuilder`, and is **rejected for Kafka** in `KafkaMessagingOperations` rather than
+silently ignored — a per-provider difference surfaced in the type system, not papered over.
+
 ### Constraints that will bite you
 
 - **Queue names are always query parameters, never path segments.** `DEV.QUEUE.1` is an ordinary name,

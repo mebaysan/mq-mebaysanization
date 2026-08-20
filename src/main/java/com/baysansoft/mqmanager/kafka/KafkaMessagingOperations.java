@@ -14,9 +14,11 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.CreateTopicsOptions;
 import org.apache.kafka.clients.admin.DeleteRecordsOptions;
 import org.apache.kafka.clients.admin.DeletedRecords;
 import org.apache.kafka.clients.admin.ListTopicsOptions;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.RecordsToDelete;
 import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -31,6 +33,8 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.errors.AuthorizationException;
+import org.apache.kafka.common.errors.InvalidReplicationFactorException;
+import org.apache.kafka.common.errors.TopicExistsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -45,6 +49,8 @@ import com.baysansoft.mqmanager.jms.BrokerUrls;
 import com.baysansoft.mqmanager.messaging.ProviderMessagingOperations;
 import com.baysansoft.mqmanager.messaging.model.BrowseResult;
 import com.baysansoft.mqmanager.messaging.model.ConnectionTestResult;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicCommand;
+import com.baysansoft.mqmanager.messaging.model.CreateTopicOutcome;
 import com.baysansoft.mqmanager.messaging.model.DeleteOutcome;
 import com.baysansoft.mqmanager.messaging.model.DepthOutcome;
 import com.baysansoft.mqmanager.messaging.model.DestinationEntry;
@@ -410,6 +416,68 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
         }
     }
 
+    // ------------------------------------------------------------------ create topic
+
+    /**
+     * Creates one topic through the admin API.
+     *
+     * <p>The only provider that acts on this: a Kafka topic is created deliberately, with a partition
+     * count and replication factor that cannot be inferred, where the JMS brokers create a queue on
+     * first send or not at all. The default in {@link ProviderMessagingOperations} refuses on their
+     * behalf, so nothing above this branches on the provider.
+     *
+     * <p>Not try-with-resources, for the reason the rest of this class is not: {@code Admin.close()}
+     * defaults to waiting {@code Long.MAX_VALUE} ms, which would outlast every other bound here.
+     */
+    @Override
+    public CreateTopicOutcome createTopic(ConnectionProfile profile, CreateTopicCommand command) {
+        String action = "create the topic";
+        Admin admin = clientFactory.admin(profile, passwordResolver.resolve(profile));
+        try {
+            NewTopic newTopic = new NewTopic(command.name(), command.partitions(),
+                    command.replicationFactor());
+            if (!command.configs().isEmpty()) {
+                newTopic.configs(command.configs());
+            }
+            admin.createTopics(List.of(newTopic), new CreateTopicsOptions().timeoutMs(apiTimeoutMs()))
+                    .all()
+                    .get(apiTimeoutMs(), TimeUnit.MILLISECONDS);
+
+            log.info("Created topic '{}' with {} partition(s), replication factor {}, {} config(s)",
+                    command.name(), command.partitions(), command.replicationFactor(),
+                    command.configs().size());
+            return new CreateTopicOutcome(command.name(), command.partitions(),
+                    command.replicationFactor(), createNote());
+
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof TopicExistsException) {
+                // The caller asked to create a new topic, not to reconcile an existing one — a 409 that
+                // names the topic is a truer answer than a create that silently did nothing.
+                throw new MqOperationException("QUEUE_ALREADY_EXISTS", HttpStatus.CONFLICT,
+                        "Topic '" + command.name() + "' already exists on this cluster.", cause);
+            }
+            if (cause instanceof InvalidReplicationFactorException) {
+                // Almost always "more replicas than brokers": a client mistake, so 400 rather than the
+                // 502 the generic translator would give a broker-side fault.
+                throw new MqOperationException("INVALID_REPLICATION_FACTOR", HttpStatus.BAD_REQUEST,
+                        "Replication factor " + command.replicationFactor() + " cannot be satisfied: it "
+                                + "exceeds the number of brokers in the cluster. " + cause.getMessage(),
+                        cause);
+            }
+            throw errorTranslator.translate(e, profile, action);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw errorTranslator.translate(e, profile, action);
+        } catch (MqOperationException e) {
+            throw e;
+        } catch (Exception e) {
+            throw errorTranslator.translate(e, profile, action);
+        } finally {
+            closeQuietly(() -> admin.close(closeTimeout()));
+        }
+    }
+
     // ------------------------------------------------------------------ delete one
 
     /**
@@ -534,6 +602,12 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
                 + "offset minus start offset, summed over " + partitions + " partition(s). Records "
                 + "consumers have already read still count until retention removes them, and a "
                 + "compacted topic counts only the surviving version of each key.";
+    }
+
+    private static String createNote() {
+        return "Created through the Kafka admin API. The cluster spreads the partitions across its "
+                + "brokers and any topic configs take effect immediately; a partition count can be "
+                + "raised later but never lowered.";
     }
 
     private static String purgeNote(int partitions) {

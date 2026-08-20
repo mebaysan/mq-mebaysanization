@@ -5,7 +5,9 @@ import { useConnections, useDeleteConnection, useTestConnection } from '../api/c
 import { ApiError } from '../api/client'
 import type { ConnectionProfile } from '../api/types'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ChevronRightIcon, PlusIcon } from '../components/icons'
 import {
+  cardClass,
   EmptyState,
   ErrorBanner,
   ProviderBadge,
@@ -69,16 +71,18 @@ export default function ConnectionsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Connections</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Saved brokers. Passwords are encrypted on disk and never sent back to this page.
-          </p>
+      <div className={`hero-surface overflow-hidden ${cardClass}`}>
+        <div className="hero-grid flex flex-wrap items-center justify-between gap-4 px-5 py-6">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-fg">Connections</h1>
+            <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-fg-muted">
+              Saved brokers. Passwords are encrypted on disk and never sent back to this page.
+            </p>
+          </div>
+          <Link to="/connections/new" className={buttonClass}>
+            <PlusIcon size={16} /> New connection
+          </Link>
         </div>
-        <Link to="/connections/new" className={buttonClass}>
-          New connection
-        </Link>
       </div>
 
       {isPending && <Skeleton rows={3} />}
@@ -105,9 +109,9 @@ export default function ConnectionsPage() {
       )}
 
       {data && data.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className={`overflow-hidden ${cardClass}`}>
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <thead className="border-b border-line bg-surface-2/70 text-xs font-medium uppercase tracking-wide text-fg-subtle">
               <tr>
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Provider</th>
@@ -115,11 +119,23 @@ export default function ConnectionsPage() {
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-line">
               {data.map((profile) => (
-                <tr key={profile.id} className="hover:bg-slate-50">
+                <tr
+                  key={profile.id}
+                  onClick={() => void navigate(`/connections/${profile.id}/queue`)}
+                  className="group cursor-pointer transition-colors duration-150 hover:bg-hover/70"
+                >
                   <td className="px-4 py-3">
-                    <div className="font-medium text-slate-900">{profile.name}</div>
+                    {/* A real Link so keyboard users can reach it, while the whole row handles the mouse.
+                        stopPropagation avoids navigating twice on a direct name click. */}
+                    <Link
+                      to={`/connections/${profile.id}/queue`}
+                      onClick={(event) => event.stopPropagation()}
+                      className="font-medium text-fg transition-colors group-hover:text-brand-700"
+                    >
+                      {profile.name}
+                    </Link>
                     {!profile.credentialsReadable && (
                       <div className="mt-0.5 text-xs text-amber-700">
                         Stored password cannot be decrypted — edit and re-enter it.
@@ -129,11 +145,16 @@ export default function ConnectionsPage() {
                   <td className="px-4 py-3">
                     <ProviderBadge provider={profile.provider} label={profile.providerLabel} />
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                  <td className="px-4 py-3 font-mono text-xs text-fg-muted">
                     {describeTarget(profile)}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex justify-end gap-2">
+                    {/* The row is the primary click; these actions must not trigger it, so the cell
+                        stops the click from bubbling up to the row. */}
+                    <div
+                      className="flex items-center justify-end gap-2"
+                      onClick={(event) => event.stopPropagation()}
+                    >
                       <button
                         type="button"
                         className={secondaryButtonClass}
@@ -156,9 +177,15 @@ export default function ConnectionsPage() {
                       >
                         Delete
                       </button>
-                      <Link to={`/connections/${profile.id}/queue`} className={buttonClass}>
-                        Open
-                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => void navigate(`/connections/${profile.id}/queue`)}
+                        aria-label={`Open ${profile.name}`}
+                        title="Open"
+                        className="ml-1 grid h-9 w-9 place-items-center rounded-lg text-fg-subtle transition-colors hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/20"
+                      >
+                        <ChevronRightIcon size={18} />
+                      </button>
                     </div>
                   </td>
                 </tr>
