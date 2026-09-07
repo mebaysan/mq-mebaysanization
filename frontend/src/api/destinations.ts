@@ -26,6 +26,9 @@ export function useDestinations(
   kind: DestinationKind | null,
   prefix: string,
   enabled: boolean,
+  // 0 = the server's configured default page. The always-on sidebar asks for a larger page so its
+  // local substring filter has more to match against; the picker leaves it at the default.
+  limit = 0,
 ) {
   const trimmed = prefix.trim()
   const params = new URLSearchParams()
@@ -35,10 +38,13 @@ export function useDestinations(
   if (trimmed !== '') {
     params.set('prefix', trimmed)
   }
+  if (limit > 0) {
+    params.set('limit', String(limit))
+  }
   const query = params.toString()
 
   return useQuery({
-    queryKey: queryKeys.destinations(id, kind ?? '', trimmed),
+    queryKey: queryKeys.destinations(id, kind ?? '', trimmed, limit),
     queryFn: () =>
       api.get<DestinationListing>(
         `/api/connections/${id}/destinations${query === '' ? '' : `?${query}`}`,
@@ -46,6 +52,9 @@ export function useDestinations(
     enabled,
     // One listing is one broker round trip. Re-opening the picker within the minute should not repeat it.
     staleTime: 60_000,
+    // Keep the last page on screen while a re-query (kind change, refresh) loads, so the list refines in
+    // place instead of blinking back to a skeleton.
+    placeholderData: (previous) => previous,
   })
 }
 

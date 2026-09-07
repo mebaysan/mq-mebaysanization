@@ -15,8 +15,8 @@ export const queryKeys = {
   /** Prefix over every kind/prefix listing, so creating a topic can invalidate them all at once. */
   destinationsRoot: (id: number) => ['connections', id, 'destinations'] as const,
   /** Under the connection prefix, so deleting a connection clears its listing too. */
-  destinations: (id: number, kind: string, prefix: string) =>
-    ['connections', id, 'destinations', kind, prefix] as const,
+  destinations: (id: number, kind: string, prefix: string, limit: number) =>
+    ['connections', id, 'destinations', kind, prefix, limit] as const,
   savedDestinations: (id: number) => ['connections', id, 'saved-destinations'] as const,
   /** Prefix, so clearing the buffer invalidates every filter combination at once. */
   logsRoot: () => ['logs'] as const,

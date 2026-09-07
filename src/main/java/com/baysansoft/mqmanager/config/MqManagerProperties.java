@@ -24,6 +24,15 @@ public class MqManagerProperties {
       */
      private boolean logPayloads = false;
 
+    /**
+     * Open the default browser at the app's own URL once the server is up. Off here (and in
+     * {@code application.yml}) so that {@code mvn spring-boot:run} and every test stay silent; the
+     * desktop launchers (the Windows .exe / .bat and {@code package-windows.ps1}) turn it on with
+     * {@code -Dmqmanager.open-browser=true}, which is the one context where a human just double-clicked
+     * an icon and expects a window.
+     */
+    private boolean openBrowser = false;
+
     private Browse browse = new Browse();
     private Purge purge = new Purge();
     private Depth depth = new Depth();
@@ -374,6 +383,14 @@ public class MqManagerProperties {
 
     public void setLogPayloads(boolean logPayloads) {
         this.logPayloads = logPayloads;
+    }
+
+    public boolean isOpenBrowser() {
+        return openBrowser;
+    }
+
+    public void setOpenBrowser(boolean openBrowser) {
+        this.openBrowser = openBrowser;
     }
 
     public Kafka getKafka() {

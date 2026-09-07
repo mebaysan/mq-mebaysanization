@@ -79,7 +79,7 @@ export function Skeleton({ rows = 3 }: { rows?: number }) {
       {Array.from({ length: rows }).map((_, index) => (
         <div
           key={index}
-          className="h-10 animate-pulse rounded-lg bg-gradient-to-r from-surface-2 via-line to-surface-2"
+          className="skeleton-shimmer h-10 rounded-lg"
         />
       ))}
     </div>

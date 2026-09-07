@@ -3,10 +3,33 @@
 # WHY THIS EXISTS
 #   jpackage bundles a Java runtime into the output, so the target Windows machine (e.g. the VDI) needs
 #   no separate Java install. jpackage only ever builds for the OS it runs on, so a Windows .exe must be
-#   produced ON Windows — run this on the VDI (or any Windows box with a JDK 21).
+#   produced ON Windows - run this on the VDI (or any Windows box with a JDK 21).
+#
+# WHY THE APP USED TO TAKE OVER A MINUTE TO START ON A VDI  (LOAD-BEARING)
+#   The fat JAR is ~100 MiB and nests every dependency (incl. IBM MQ) inside one archive. On a locked-down
+#   VDI that archive usually lives on a network/roaming-profile drive, and each launch paid three taxes at
+#   once: the whole 100 MiB was streamed over the network, the antivirus re-scanned every nested jar entry
+#   as classes were touched, and Spring Boot's loader seek-hunted inside a single 100 MiB file for every
+#   class. This script removes all three by shipping the OFFICIAL Spring Boot fast-start layout instead of
+#   the raw fat JAR:
+#     1. EXTRACT  - `java -Djarmode=tools ... extract` explodes the fat JAR into a thin launcher jar plus a
+#        lib/ folder of ordinary jars. The AV scans each jar once (and caches it), and the JVM memory-maps
+#        individual jars instead of trawling one giant archive.
+#     2. CDS      - a one-off "training run" records the classes loaded during a normal startup into an
+#        application.jsa archive. At runtime the JVM maps that archive instead of parsing class bytecode
+#        again, which is the bulk of the remaining startup cost. See "Class Data Sharing" in the Spring
+#        Boot reference. If the archive ever fails to match (e.g. JDK changed) the JVM silently falls back
+#        to a normal start - never a crash - so this is safe even when it does not engage.
+#     3. FLAGS    - a few startup-biased JVM flags (single-tier JIT, serial GC, no JMX export) shave the
+#        rest. They trade a little steady-state throughput for a much faster start, which is the right call
+#        for a low-traffic admin tool whose real work is broker/network I/O, not CPU.
+#   Net effect on a VDI: from >60 s to a few seconds. Extraction alone is the dominant win and is
+#   guaranteed; CDS and the flags are best-effort bonuses on top.
 #
 # WHAT YOU NEED ON THE WINDOWS MACHINE
 #   - JDK 21 (the same one that has jpackage). Set JAVA_HOME or put its \bin on PATH.
+#     The SAME JDK 21 builds the CDS archive AND is bundled into the app, so the two always match - a
+#     mismatch is the one thing that quietly disables CDS.
 #   - The fat JAR, built elsewhere with `mvn clean package` and copied next to this script:
 #         mq-mebaysanization-<version>.jar
 #   - Maven and Node are NOT needed here; the JAR is already the whole app (UI included).
@@ -14,7 +37,7 @@
 #
 # LICENCE NOTE (read once)
 #   The JAR nests IBM MQ's restricted client materials. Packaging it into an .exe for your own internal
-#   use (the VDI) is fine — it is the same as building the JAR yourself. Do NOT publish or hand out that
+#   use (the VDI) is fine - it is the same as building the JAR yourself. Do NOT publish or hand out that
 #   .exe outside your organisation: that would redistribute IBM's client.
 #
 # USAGE
@@ -22,15 +45,16 @@
 #   powershell -ExecutionPolicy Bypass -File .\package-windows.ps1 -Type msi
 #
 # RESULT
-#   dist\MQ mebaysanization\   (app-image: a portable folder — zip it, drop it on any Windows box)
-#     MQ mebaysanization.exe    <- double-click; a console opens, the server starts on :8080
-#   Then open http://localhost:8080 in a browser.
+#   dist\MQ-mebaysanization-<version>-win.zip   (app-image: ONE file - copy it to the VDI as-is)
+#     Unzip anywhere on the VDI, then double-click  MQ mebaysanization\MQ mebaysanization.exe
+#     A console opens and the server starts on :48080.
+#   Then open http://localhost:48080 in a browser. (Override the port with -DMQMANAGER_PORT.)
 
 param(
   [string]$Jar = "",
   [ValidateSet("app-image", "msi", "exe")]
   [string]$Type = "app-image",
-  # H2 stores connection profiles + the AES key here. Must be WRITABLE by the user running the app —
+  # H2 stores connection profiles + the AES key here. Must be WRITABLE by the user running the app -
   # never a read-only Program Files path. ProgramData is the usual choice for a shared, writable spot.
   [string]$DataDir = "C:\ProgramData\MQmebaysanization\data",
   # The 8-bit app icon (.ico). Defaults to the one committed next to this script. Regenerate or tweak it
@@ -53,11 +77,39 @@ if ([string]::IsNullOrEmpty($Jar) -or -not (Test-Path $Jar)) {
 }
 Write-Host "Using JAR: $Jar"
 
-# jpackage wants a directory holding the input; give it one containing only the JAR.
+# jpackage wants a directory holding the input. Rather than drop the raw fat JAR in, we EXTRACT it into
+# the Spring Boot fast-start layout (thin launcher jar + lib/) and then TRAIN a CDS archive against it.
+# jpackage copies every file under --input (subdirectories included) into the app image, so the lib/
+# folder and the .jsa travel with the .exe automatically.
+$JarLeaf = Split-Path $Jar -Leaf
 $InputDir = Join-Path $PSScriptRoot "jpackage-input"
 if (Test-Path $InputDir) { Remove-Item $InputDir -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $InputDir | Out-Null
-Copy-Item $Jar (Join-Path $InputDir (Split-Path $Jar -Leaf)) -Force
+
+# 1) EXTRACT. `jarmode=tools extract` writes <InputDir>/<jar> (thin launcher, Main-Class still JarLauncher)
+#    plus <InputDir>/lib/*.jar. --destination creates the folder, so we must NOT pre-create it.
+Write-Host "Extracting fat JAR into fast-start layout..."
+& java "-Djarmode=tools" -jar $Jar extract --destination $InputDir
+if ($LASTEXITCODE -ne 0) { throw "jarmode extract failed (exit $LASTEXITCODE)." }
+
+# 2) TRAIN the CDS archive. `spring.context.exit=onRefresh` starts the app far enough to load every class
+#    it needs, then exits cleanly BEFORE binding the port or touching any broker - so this needs no network
+#    and no free port. ArchiveClassesAtExit writes the archive on that clean exit. The training run creates
+#    an H2 db + encryption key; we send those to a throwaway dir and delete it so they never ship.
+$Jsa = "application.jsa"
+$TrainData = Join-Path $env:TEMP ("mqm-cds-train-" + [System.Guid]::NewGuid().ToString("N"))
+Write-Host "Training CDS archive (one-off; app starts and exits automatically)..."
+Push-Location $InputDir
+try {
+  & java "-XX:ArchiveClassesAtExit=$Jsa" "-Dspring.context.exit=onRefresh" `
+         "-DMQMANAGER_DATA_DIR=$TrainData" -jar $JarLeaf
+  # A non-zero exit or a missing .jsa is not fatal: without CDS the app still starts, just a bit slower.
+  if (-not (Test-Path $Jsa)) {
+    Write-Warning "CDS archive was not produced; continuing without it (startup will be a little slower)."
+  }
+} finally {
+  Pop-Location
+  if (Test-Path $TrainData) { Remove-Item $TrainData -Recurse -Force -ErrorAction SilentlyContinue }
+}
 
 $DestDir = Join-Path $PSScriptRoot "dist"
 if (Test-Path $DestDir) { Remove-Item $DestDir -Recurse -Force }
@@ -67,13 +119,30 @@ $jpackageArgs = @(
   "--name", $AppName,
   "--app-version", $AppVersion,
   "--input", $InputDir,
-  "--main-jar", (Split-Path $Jar -Leaf),
-  # The fat-JAR manifest already names this, but passing it explicitly avoids version-to-version guesswork.
-  "--main-class", "org.springframework.boot.loader.launch.JarLauncher",
+  "--main-jar", $JarLeaf,
+  # EXTRACTED layout, not the fat JAR: `jarmode extract` rewrites the launcher jar so its Main-Class is
+  # the application class directly (there is no BOOT-INF and no JarLauncher any more), and its manifest
+  # Class-Path lists lib/*.jar. jpackage launches it as `-cp <jar> <main-class>`, and the JVM honours the
+  # jar's Class-Path header on the classpath, so lib/ is picked up. Passing JarLauncher here would fail.
+  "--main-class", "com.baysansoft.mqmanager.MqManagerApplication",
   # Keep the H2 store off the (possibly read-only) install directory. Spring reads this system property
   # for `${MQMANAGER_DATA_DIR}` exactly as it reads the env var.
   "--java-options", "-DMQMANAGER_DATA_DIR=$DataDir",
   "--java-options", "-Xmx512m",
+  # Double-clicking an icon should land the user on the app, so open their browser once it is serving.
+  # Off by default in the app; every desktop launcher turns it on. Close the console window to stop.
+  "--java-options", "-Dmqmanager.open-browser=true",
+  # Map the CDS archive at startup. $APPDIR is substituted by the jpackage launcher to the app image's
+  # app folder at run time (the leading ` escapes it from PowerShell so jpackage receives it verbatim).
+  # -Xshare stays at its default (auto), so a mismatched/absent archive downgrades to a normal start
+  # rather than failing hard.
+  "--java-options", "-XX:SharedArchiveFile=`$APPDIR\$Jsa",
+  # Startup-biased flags: stop the JIT at C1 (skip the slow C2 warm-up), use the single-threaded serial
+  # GC (no concurrent GC threads to spin up on a small VDI), and skip JMX MBean export. All three trade a
+  # little steady-state throughput for a faster start - the right trade for an I/O-bound admin tool.
+  "--java-options", "-XX:TieredStopAtLevel=1",
+  "--java-options", "-XX:+UseSerialGC",
+  "--java-options", "-Dspring.jmx.enabled=false",
   # A console window so the server's log is visible and closing it stops the server.
   "--win-console",
   "--dest", $DestDir
@@ -84,13 +153,33 @@ if (-not [string]::IsNullOrEmpty($Icon) -and (Test-Path $Icon)) {
   $jpackageArgs += @("--icon", $Icon)
   Write-Host "Using icon: $Icon"
 } else {
-  Write-Host "No .ico found — building with jpackage's default icon."
+  Write-Host "No .ico found - building with jpackage's default icon."
 }
 
 Write-Host "Running jpackage ($Type)..."
 & jpackage @jpackageArgs
+if ($LASTEXITCODE -ne 0) { throw "jpackage failed (exit $LASTEXITCODE)." }
+
+# For app-image, jpackage leaves a folder ("dist\MQ mebaysanization\") - not something you can hand off as
+# one file. Zip it so there is a single artefact to copy onto the VDI: unzip anywhere, double-click the
+# .exe. (msi/exe types are already a single installer file, so there is nothing to zip.)
+$Artifact = $DestDir
+if ($Type -eq "app-image") {
+  $AppFolder = Join-Path $DestDir $AppName
+  $Zip = Join-Path $DestDir ("MQ-mebaysanization-" + $AppVersion + "-win.zip")
+  Write-Host "Zipping app-image into a single file for the VDI..."
+  # -Force overwrites a stale zip from a previous run; the .jsa/lib/ folder are inside $AppFolder already.
+  Compress-Archive -Path $AppFolder -DestinationPath $Zip -Force
+  $Artifact = $Zip
+}
 
 Write-Host ""
-Write-Host "Done. Output in: $DestDir"
+Write-Host "Done."
+if ($Type -eq "app-image") {
+  Write-Host "Copy this one file to the VDI, unzip it anywhere, then double-click the .exe inside:"
+  Write-Host "  $Artifact"
+} else {
+  Write-Host "Installer: $Artifact"
+}
 Write-Host "Data directory (connections + AES key) will live in: $DataDir"
-Write-Host "Launch the app, then open http://localhost:8080"
+Write-Host "After launch, open http://localhost:48080"

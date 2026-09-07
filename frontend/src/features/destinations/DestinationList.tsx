@@ -13,6 +13,12 @@ const KIND_DOT: Record<DestinationKind, string> = {
   UNKNOWN: 'bg-slate-400',
 }
 
+// The search box is a free-text SUBSTRING filter over the loaded page (a broker-side prefix would be a
+// different, narrower thing — that lives in the Advanced picker, by project rule). So the always-on rail
+// asks for a big page: the more it holds, the more the substring filter can find without a round trip.
+// The server clamps this to mqmanager.destinations.max-limit anyway.
+const SIDEBAR_LIST_LIMIT = 2000
+
 interface DestinationListProps {
   connectionId: number
   caveat: ProviderCaveat
@@ -47,7 +53,7 @@ export function DestinationList({
   const [search, setSearch] = useState('')
   const [showInternal, setShowInternal] = useState(false)
 
-  const listing = useDestinations(connectionId, null, '', true)
+  const listing = useDestinations(connectionId, null, '', true, SIDEBAR_LIST_LIMIT)
   const data = listing.data
 
   const visible = useMemo(() => {
@@ -109,7 +115,7 @@ export function DestinationList({
           />
         </div>
         <p className="mt-1.5 px-0.5 text-[11px] text-fg-subtle">
-          Press Enter to open the exact name you typed.
+          Filters the list by any part of the name. Press Enter to open an exact name.
         </p>
       </div>
 
@@ -147,7 +153,10 @@ export function DestinationList({
           <p className="px-3 py-6 text-center text-sm text-fg-subtle">
             {data.destinations.length === 0
               ? `No ${caveat.noun}s here yet.`
-              : 'Nothing matches your filter.'}
+              : data.truncated
+                ? `Nothing in the ${data.destinations.length} loaded matches. It may be further down — ` +
+                  `press Enter to open an exact name, or narrow with Advanced.`
+                : 'Nothing matches your filter.'}
           </p>
         )}
 
@@ -213,7 +222,7 @@ function DestinationRow({
         type="button"
         onClick={() => onOpen({ name: entry.name, kind: entry.kind })}
         aria-current={active ? 'true' : undefined}
-        className={`group relative flex w-full items-center gap-2.5 rounded-lg py-2 pl-3 pr-2 text-left transition-colors duration-150 ${
+        className={`group relative flex w-full items-start gap-2.5 rounded-lg py-2 pl-3 pr-2 text-left transition-[background-color,transform] duration-150 active:scale-[0.99] ${
           active
             ? 'bg-gradient-to-r from-accent-50 to-brand-50 text-brand-900'
             : 'text-fg-muted hover:bg-hover'
@@ -226,10 +235,14 @@ function DestinationRow({
           }`}
           aria-hidden="true"
         />
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${KIND_DOT[entry.kind]}`} aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
+        <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${KIND_DOT[entry.kind]}`} aria-hidden="true" />
+        {/* Wraps rather than truncates: a long, heavily-prefixed name is unreadable when its end is cut
+            off, and the whole point of the list is to recognise a name. title= keeps a hover copy too. */}
+        <span className="min-w-0 flex-1 break-all font-mono text-xs leading-snug" title={entry.name}>
+          {entry.name}
+        </span>
         {entry.internal && (
-          <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-fg-subtle ring-1 ring-inset ring-line">
+          <span className="mt-0.5 shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-fg-subtle ring-1 ring-inset ring-line">
             internal
           </span>
         )}
