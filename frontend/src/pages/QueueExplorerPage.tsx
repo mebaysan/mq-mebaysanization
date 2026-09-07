@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 
 import { ApiError } from '../api/client'
@@ -94,6 +101,35 @@ export default function QueueExplorerPage() {
   const [confirmPurge, setConfirmPurge] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+
+  // The rail is drag-resizable so long, heavily-prefixed names can be read in full — widen it instead of
+  // relying on wrap or a hover tooltip. Width is kept in memory only (no localStorage anywhere, by
+  // project rule), so it resets to the default on reload, which is fine for a per-session preference.
+  const SIDEBAR_MIN = 220
+  const SIDEBAR_MAX = 680
+  const SIDEBAR_DEFAULT = 288
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
+
+  const startSidebarResize = (event: ReactPointerEvent) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = sidebarWidth
+    const onMove = (move: PointerEvent) => {
+      const next = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startWidth + (move.clientX - startX)))
+      setSidebarWidth(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      // Restore the selection/cursor the drag borrowed from the whole document.
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   // Never null: a blank noun would render as a missing word rather than as a loading state.
   const caveats = connection.data ? PROVIDER_CAVEATS[connection.data.provider] : DEFAULT_CAVEAT
@@ -245,17 +281,48 @@ export default function QueueExplorerPage() {
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <DestinationList
-          connectionId={connectionId}
-          caveat={caveats}
-          activeName={activeQueue}
-          onOpen={openEntry}
-          onBrowseAdvanced={() => setPickerOpen(true)}
-          onCreate={caveats.canCreateTopic ? () => setCreateOpen(true) : undefined}
-        />
+      <div
+        className="flex flex-col gap-5 lg:flex-row lg:gap-0 lg:items-start"
+        style={{ '--rail': `${sidebarWidth}px` } as CSSProperties}
+      >
+        <div className="w-full lg:w-[var(--rail)] lg:shrink-0">
+          <DestinationList
+            connectionId={connectionId}
+            caveat={caveats}
+            activeName={activeQueue}
+            onOpen={openEntry}
+            onBrowseAdvanced={() => setPickerOpen(true)}
+            onCreate={caveats.canCreateTopic ? () => setCreateOpen(true) : undefined}
+          />
+        </div>
 
-        <div className="min-w-0">
+        {/* Drag to widen the rail so long names are readable; double-click resets, arrows nudge it.
+            Desktop only — on a stacked mobile layout there is no column to resize. */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the list. Drag, or use the left and right arrow keys."
+          tabIndex={0}
+          onPointerDown={startSidebarResize}
+          onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault()
+              setSidebarWidth((w) => Math.max(SIDEBAR_MIN, w - 16))
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault()
+              setSidebarWidth((w) => Math.min(SIDEBAR_MAX, w + 16))
+            }
+          }}
+          title="Drag to resize · double-click to reset"
+          className="group hidden w-6 shrink-0 cursor-col-resize touch-none select-none items-center justify-center rounded focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/20 lg:flex lg:sticky lg:top-24 lg:h-[calc(100dvh-9rem)]"
+        >
+          {/* A slim pill inside a 24px grab zone — the whole 24px is draggable, the pill just marks it and
+              thickens on hover so the target is findable. */}
+          <span className="h-16 w-1 rounded-full bg-line transition-all group-hover:h-20 group-hover:w-1.5 group-hover:bg-brand-400 group-focus-visible:bg-brand-400" />
+        </div>
+
+        <div className="min-w-0 flex-1">
           {!hasQueue && (
             <div className="flex h-full items-center">
               <EmptyState title={`Select a ${caveats.noun}`} body={caveats.chooseNote} />
@@ -263,7 +330,7 @@ export default function QueueExplorerPage() {
           )}
 
           {hasQueue && (
-            <div className="min-w-0 space-y-4">
+            <div key={activeQueue} className="animate-fade-in min-w-0 space-y-4">
                 <div className={`flex flex-wrap items-start justify-between gap-3 p-4 ${cardClass}`}>
                   <div className="min-w-0">
                     <h2 className="truncate font-mono text-sm font-semibold text-fg">

@@ -34,7 +34,7 @@ export function Modal({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="animate-fade-in fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm" />
+        <Dialog.Overlay className="animate-overlay fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm" />
         <div
           className={cn(
             'fixed inset-0 z-40 flex justify-center overflow-y-auto p-4 sm:p-8',
@@ -43,7 +43,7 @@ export function Modal({
         >
           <Dialog.Content
             className={cn(
-              'animate-scale-in relative my-auto w-full rounded-2xl border border-line/60 bg-surface shadow-overlay focus:outline-none',
+              'animate-panel relative my-auto w-full rounded-2xl border border-line/60 bg-surface shadow-overlay focus:outline-none',
               contentClassName,
             )}
           >

@@ -198,6 +198,65 @@ body {
   animation: slide-up-fade 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Exit halves of the entrances, for elements that animate out before unmounting (Radix Dialog). Kept
+   shorter than the matching entrance so dismissal feels quicker than arrival (MD "exit faster"). */
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes scale-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+
+/* Modal overlay + panel: enter on open, exit on close. Radix stamps data-state on these nodes and
+   defers unmount until the running animation finishes, so the panel scales back out instead of
+   snapping away. Both halves are transform/opacity only, so they stay on the compositor. */
+.animate-overlay {
+  animation: fade-in 160ms ease-out both;
+}
+.animate-overlay[data-state='closed'] {
+  animation: fade-out 120ms ease-in both;
+}
+.animate-panel {
+  animation: scale-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-panel[data-state='closed'] {
+  animation: scale-out 130ms ease-in both;
+}
+
+/* A travelling sheen for skeletons — smoother than a whole-block pulse, and it reads as "loading"
+   rather than "blinking". It loops (a loader legitimately may); the reduced-motion block below freezes
+   it to a flat gradient. */
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+.skeleton-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--line) 37%,
+    var(--surface-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
 /* Respect the user's motion preference: no entrances, no transitions worth the name. */
 @media (prefers-reduced-motion: reduce) {
   *,

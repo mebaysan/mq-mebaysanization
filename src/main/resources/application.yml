@@ -13,6 +13,9 @@ mqmanager:
   # Bodies that are written also appear on the (unauthenticated) Logs page. Set to false to keep them
   # out regardless of level.
   log-payloads: ${MQMANAGER_LOG_PAYLOADS:true}
+  # Open the default browser at this app once it is serving. Off by default so `spring-boot:run` and
+  # tests stay silent; the Windows desktop launchers set -Dmqmanager.open-browser=true (or the env var).
+  open-browser: ${MQMANAGER_OPEN_BROWSER:false}
 
   browse:
     default-limit: 100
