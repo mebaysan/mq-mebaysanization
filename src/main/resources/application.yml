@@ -54,6 +54,9 @@ mqmanager:
     command-wait: 5s
     # Remembered destinations kept per connection. Pinned ones are never evicted, so this is a soft cap.
     saved-per-connection: 50
+  requests:
+    # Automatic send-history entries kept per destination. Named requests are never evicted by this cap.
+    history-per-destination: 10
   kafka:
     # Kafka's own defaults run to minutes — max.block.ms alone is 60s, and it is what a producer waits
     # on for a topic that does not exist. There is no shared connection to bound, so every call carries
@@ -76,6 +79,12 @@ mqmanager:
 spring:
   application:
     name: mq-mebaysanization
+
+  # Site-specific broker addresses (mqmanager.seed-connections) are kept out of this public repo. A
+  # locally built JAR bundles an untracked seed-connections.yml on the classpath; `optional:` means the
+  # app starts perfectly well when that file is absent, seeding nothing. See ConnectionSeeder.
+  config:
+    import: optional:classpath:seed-connections.yml
 
   web:
     resources:

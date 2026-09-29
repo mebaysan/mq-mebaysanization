@@ -166,6 +166,22 @@ class KafkaBrowseTest {
     }
 
     @Test
+    @DisplayName("a plain browse returns the NEWEST records, newest first — not the oldest from the start")
+    void plainBrowseReadsTheNewestFromTheEnd() {
+        // Offsets 0..9, timestamps rising with offset, so offset 9 is the newest record on the topic.
+        KafkaTestFixture.seed(consumer, KafkaTestFixture.TOPIC, 10);
+
+        BrowseResult result = messaging().browse(profile, KafkaTestFixture.TOPIC, 4);
+
+        assertThat(result.returned()).isEqualTo(4);
+        // The four newest, newest first — not body-0..body-3 from the head of the topic.
+        assertThat(result.messages()).extracting(QueueMessageView::body)
+                .containsExactly("body-9", "body-8", "body-7", "body-6");
+        // Older records remain below the window, so the page is honestly marked truncated.
+        assertThat(result.truncated()).isTrue();
+    }
+
+    @Test
     @DisplayName("reading fewer records than asked for is not truncated")
     void underTheLimitIsNotTruncated() {
         KafkaTestFixture.seed(consumer, KafkaTestFixture.TOPIC, 2);

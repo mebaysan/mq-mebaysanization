@@ -39,6 +39,9 @@ application-local.yml
 application-local.properties
 .env
 .env.*
+# Site-specific seed connections (mqmanager.seed-connections): bundled into a locally built JAR and
+# imported optionally by application.yml, but the broker addresses inside are not for a public repo.
+seed-connections.yml
 
 # ---------------------------------------------------------------------------------------- maven
 # versions-maven-plugin writes this when -DgenerateBackupPoms=false is not passed. The release

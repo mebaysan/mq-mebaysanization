@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -207,7 +208,11 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
         int matchLimit = clampLimit(limit);
         int previewBytes = properties.getBrowse().getPreviewBytes();
         boolean search = query.isSearch();
-        int scanCap = search ? properties.getKafka().getSearchScanLimit() : matchLimit;
+        // A plain browse — no text, no start time — reads the NEWEST records, not the oldest. Someone
+        // opening a busy topic wants the latest activity at the top, and reading from the beginning showed
+        // records that could be months old on a retained topic. A search or a time-bounded browse keeps
+        // scanning forward from where it is told to start, because there the position is the whole point.
+        boolean fromEnd = !search && query.sinceEpochMs() == null;
         Duration budget = search
                 ? properties.getKafka().getSearchTimeout()
                 : properties.getKafka().getBrowseTimeout();
@@ -215,13 +220,41 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
 
         long[] scannedHolder = {0L};
         String[] reasonHolder = {"END"};
+        // For a from-the-end browse: true when the topic holds more (older) records than we return, so the
+        // "more may be waiting" note is honest even though we stopped at no cap.
+        boolean[] moreThanShownHolder = {false};
 
         List<QueueMessageView> messages = withConsumer(profile,
                 search ? "search the topic" : "browse the topic", consumer -> {
             List<TopicPartition> partitions = assignAllPartitions(consumer, topic);
-            seekStart(consumer, partitions, query.sinceEpochMs());
-
+            Map<TopicPartition, Long> begins = consumer.beginningOffsets(partitions, apiTimeout());
             Map<TopicPartition, Long> ends = consumer.endOffsets(partitions, apiTimeout());
+
+            int scanCap;
+            int collectCap;
+            if (fromEnd) {
+                // Position each partition at most matchLimit records from its end, then read that window
+                // to the end and keep the newest matchLimit across all of them. Bounded by the search
+                // scan cap so a topic with very many partitions cannot read an unbounded amount.
+                long tailTotal = 0;
+                long retainedTotal = 0;
+                for (TopicPartition partition : partitions) {
+                    long begin = offset(begins, partition);
+                    long end = offset(ends, partition);
+                    long tailStart = Math.max(begin, end - matchLimit);
+                    consumer.seek(partition, tailStart);
+                    tailTotal += end - tailStart;
+                    retainedTotal += end - begin;
+                }
+                collectCap = (int) Math.min(tailTotal, properties.getKafka().getSearchScanLimit());
+                scanCap = collectCap;
+                moreThanShownHolder[0] = retainedTotal > matchLimit;
+            } else {
+                seekStart(consumer, partitions, query.sinceEpochMs());
+                scanCap = search ? properties.getKafka().getSearchScanLimit() : matchLimit;
+                collectCap = matchLimit;
+            }
+
             List<QueueMessageView> collected = new ArrayList<>();
             long deadline = System.nanoTime() + budget.toNanos();
             long scanned = 0;
@@ -231,7 +264,7 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
             // and treating that as "empty" would report zero for a topic with plenty. An empty/exhausted
             // topic costs nothing: positions already equal end offsets, so the body never runs.
             while (true) {
-                if (collected.size() >= matchLimit) {
+                if (collected.size() >= collectCap) {
                     reasonHolder[0] = "MATCH_CAP";
                     break;
                 }
@@ -252,7 +285,7 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
                     scanned++;
                     if (matches(record, needle, query.caseSensitive())) {
                         collected.add(recordMapper.toView(record, previewBytes));
-                        if (collected.size() >= matchLimit) {
+                        if (collected.size() >= collectCap) {
                             break;
                         }
                     }
@@ -264,10 +297,25 @@ public class KafkaMessagingOperations implements ProviderMessagingOperations {
             // Never commitSync/commitAsync. Together with having no group id, this is what makes a
             // browse or a search provably invisible to real consumers.
             scannedHolder[0] = scanned;
+
+            if (fromEnd) {
+                // Newest first, nulls last; then keep the newest matchLimit (a multi-partition tail can
+                // hold more than one page's worth). The UI re-sorts too, but trimming to the right ones
+                // must happen here, where the timestamps are known.
+                collected.sort(Comparator.comparing(QueueMessageView::enqueueTime,
+                        Comparator.nullsLast(Comparator.reverseOrder())));
+                if (collected.size() > matchLimit) {
+                    collected = new ArrayList<>(collected.subList(0, matchLimit));
+                    moreThanShownHolder[0] = true;
+                }
+            }
             return collected;
         });
 
-        boolean truncated = !"END".equals(reasonHolder[0]);
+        boolean truncated = fromEnd
+                ? moreThanShownHolder[0]
+                        || "SCAN_CAP".equals(reasonHolder[0]) || "TIME_CAP".equals(reasonHolder[0])
+                : !"END".equals(reasonHolder[0]);
         String note = search
                 ? searchNote(scannedHolder[0], messages.size(), query, reasonHolder[0])
                 : browseNote();

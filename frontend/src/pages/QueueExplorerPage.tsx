@@ -11,9 +11,10 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { ApiError } from '../api/client'
 import { useConnection } from '../api/connections'
 import { useDeleteMessage, useDepth, useMessages, usePurgeQueue } from '../api/queue'
-import { useRecordOpen } from '../api/savedDestinations'
+import { useRecordOpen, useSavedDestinations } from '../api/savedDestinations'
 import type { DestinationKind, QueueMessage } from '../api/types'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { CopyButton } from '../components/CopyButton'
 import {
   cardClass,
   EmptyState,
@@ -28,6 +29,7 @@ import { ArrowLeftIcon, RefreshIcon, SearchIcon } from '../components/icons'
 import { useToast } from '../components/ToastProvider'
 import { CreateTopicDialog } from '../features/destinations/CreateTopicDialog'
 import { DestinationList } from '../features/destinations/DestinationList'
+import { FavoriteStar } from '../features/destinations/FavoriteStar'
 import { DestinationPicker } from '../features/destinations/DestinationPicker'
 import { MessageRow } from '../features/queue/MessageRow'
 import { DEFAULT_CAVEAT, PROVIDER_CAVEATS } from '../features/queue/ProviderCaveats'
@@ -140,15 +142,32 @@ export default function QueueExplorerPage() {
   const loadedMessages = messages.data?.messages
   const visibleMessages = useMemo(() => {
     const all = loadedMessages ?? []
-    if (serverSearches) return all
     const needle = committedContains.trim().toLowerCase()
-    return all.filter((message) => {
-      if (needle && !searchableText(message).includes(needle)) return false
-      if (sinceMs != null) {
-        const at = message.enqueueTime ? new Date(message.enqueueTime).getTime() : Number.NaN
-        if (Number.isNaN(at) || at < sinceMs) return false
-      }
-      return true
+    const filtered = serverSearches
+      ? all
+      : all.filter((message) => {
+          if (needle && !searchableText(message).includes(needle)) return false
+          if (sinceMs != null) {
+            const at = message.enqueueTime ? new Date(message.enqueueTime).getTime() : Number.NaN
+            if (Number.isNaN(at) || at < sinceMs) return false
+          }
+          return true
+        })
+    // Newest first, always. Brokers hand back the head of the queue first — oldest first for a FIFO
+    // queue, offset order for Kafka — which is the opposite of what someone watching a live destination
+    // wants. Two steps make "newest on top" hold in every case, sorting only the page already fetched
+    // (never claiming to have ordered messages beyond it, so the truncation note stays honest):
+    //   1. reverse the fetched page, so with no usable timestamps the last-fetched (newest) lead;
+    //   2. stable-sort by enqueue time descending, so when timestamps exist they decide, and when they
+    //      are missing or equal the reversed order from step 1 is preserved.
+    const timeOf = (message: QueueMessage) => {
+      const parsed = message.enqueueTime ? Date.parse(message.enqueueTime) : Number.NaN
+      return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed
+    }
+    return [...filtered].reverse().sort((a, b) => {
+      const ta = timeOf(a)
+      const tb = timeOf(b)
+      return ta === tb ? 0 : tb - ta
     })
   }, [loadedMessages, serverSearches, committedContains, sinceMs])
 
@@ -181,6 +200,11 @@ export default function QueueExplorerPage() {
     applySincePreset(null)
   }
   const isSearching = committedContains !== '' || sinceMs != null
+
+  const savedDestinations = useSavedDestinations(connectionId)
+  const favorited = (savedDestinations.data ?? []).some(
+    (entry) => entry.name === activeQueue && entry.pinned,
+  )
 
   const recordOpen = useRecordOpen(connectionId)
   // What the picker said this destination was, when it came from the picker. A typed name leaves this
@@ -272,11 +296,24 @@ export default function QueueExplorerPage() {
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight text-fg">{profile.name}</h1>
             <ProviderBadge provider={profile.provider} label={profile.providerLabel} />
-            <span className="rounded-md bg-surface/70 px-2 py-0.5 font-mono text-xs text-fg-muted ring-1 ring-inset ring-line">
-              {profile.bootstrapServers ??
+            {(() => {
+              const target =
+                profile.bootstrapServers ??
                 profile.brokerUrlOverride ??
-                `${profile.host ?? ''}:${profile.port ?? ''}`}
-            </span>
+                `${profile.host ?? ''}:${profile.port ?? ''}`
+              return (
+                <span className="inline-flex items-center gap-1 rounded-md bg-surface/70 px-2 py-0.5 font-mono text-xs text-fg-muted ring-1 ring-inset ring-line">
+                  {target}
+                  <CopyButton
+                    text={target}
+                    label=""
+                    copiedLabel=""
+                    title="Copy cluster address"
+                    className="rounded p-0.5 text-fg-subtle transition-colors hover:bg-hover hover:text-fg-muted"
+                  />
+                </span>
+              )
+            })()}
           </div>
         </div>
       </div>
@@ -333,9 +370,23 @@ export default function QueueExplorerPage() {
             <div key={activeQueue} className="animate-fade-in min-w-0 space-y-4">
                 <div className={`flex flex-wrap items-start justify-between gap-3 p-4 ${cardClass}`}>
                   <div className="min-w-0">
-                    <h2 className="truncate font-mono text-sm font-semibold text-fg">
-                      {activeQueue}
-                    </h2>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <FavoriteStar
+                        connectionId={connectionId}
+                        name={activeQueue}
+                        favorited={favorited}
+                      />
+                      <h2 className="min-w-0 truncate font-mono text-sm font-semibold text-fg">
+                        {activeQueue}
+                      </h2>
+                      <CopyButton
+                        text={activeQueue}
+                        label=""
+                        copiedLabel=""
+                        title={`Copy ${caveats.noun} name`}
+                        className="shrink-0 rounded-md p-1 text-fg-subtle transition-colors hover:bg-hover hover:text-fg-muted"
+                      />
+                    </div>
                     <div className="mt-1.5 flex items-baseline gap-2">
                       <span className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
                         {caveats.depthLabel}

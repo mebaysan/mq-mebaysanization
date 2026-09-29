@@ -90,7 +90,24 @@ capability there rather than branching on the enum constant.
 `TargetClient` (`messaging/model`) is the pattern for a provider-specific send option: it controls the
 IBM MQ MQRFH2 header (JMS vs MQ target), is threaded through `OutboundMessage` and applied in
 `IbmMqConnectionFactoryBuilder`, and is **rejected for Kafka** in `KafkaMessagingOperations` rather than
-silently ignored — a per-provider difference surfaced in the type system, not papered over.
+silently ignored — a per-provider difference surfaced in the type system, not papered over. There is a
+matching `SUPPORTS_TARGET_CLIENT` capability on `Provider` (in `domain/`) — check the capability, don't
+name the constant.
+
+**A `default` method on `MessagingOperations` is how an operation only some providers can honour is
+added — and it either refuses or degrades honestly, never lies.** Two examples both added after the seams:
+
+- `createTopic(CreateTopicCommand) → CreateTopicOutcome` is a `default` that **throws**
+  `OPERATION_NOT_SUPPORTED` (501). Only Kafka overrides it; the JMS brokers create a queue on first send
+  (ActiveMQ, Artemis) or not at all (IBM MQ), and neither is an explicit create — so a caller gets an
+  honest refusal, not a create that quietly did nothing. `CreateTopicOutcome` echoes what the broker
+  *actually* accepted (partitions, replication factor, a `note`), stating the result rather than the
+  request.
+- `browse(..., MessageQuery)` is a `default` that **degrades**: it ignores the query and returns a plain
+  first-N browse, so a provider that cannot scan server-side never claims to have searched. Only Kafka
+  overrides it to seek by timestamp (`sinceEpochMs`) and scan for a substring (`contains`,
+  `caseSensitive`), reporting via `BrowseResult.truncated` how far it got. `MessageQuery.NONE` is the
+  no-search sentinel; `isSearch()` distinguishes a real query from a plain browse.
 
 ### Constraints that will bite you
 
@@ -111,6 +128,11 @@ silently ignored — a per-provider difference surfaced in the type system, not 
 - **`LogBuffer` may not log.** It runs inside the logging pipeline and a single log statement recurses
   until the stack runs out. It is created by `LogBufferInstaller` *before* the Spring context (which is
   why Flyway output is captured) and handed to the context by `MqManagerApplication#logBuffer()`.
+- **`BrowserLauncher` pops the default browser only when `mqmanager.open-browser` is on** — off by
+  default, set only by the desktop launchers, so a server or `spring-boot:run` never opens a window. It
+  reads the port from `WebServerInitializedEvent` (not `server.port`, which may be `0` = pick-any) and
+  opens on `ApplicationReadyEvent`; a browser that won't launch is logged and swallowed, never fatal —
+  the server being up is the thing that matters.
 - **Never add a dependency without re-running `verify-portability.sh`.** It proves the JAR needs nothing
   from the host: `jakarta.jms-api` must be 3.x, no platform-classifier artifacts, and no bundled native
   binaries outside a by-name allowlist that is then proved multi-platform.
@@ -128,6 +150,10 @@ silently ignored — a per-provider difference surfaced in the type system, not 
 - **No `localStorage` anywhere.** State worth keeping is either in the URL (`?queue=`, via
   `useSearchParams`) or server-side in H2. Introducing browser storage would fork the state model.
 - `refetchOnWindowFocus` is off globally: focus refetch would fire real broker connections.
+- `CommandPalette` (`components/`, built on `cmdk`) is mounted once globally; it opens on ⌘K/Ctrl-K or a
+  `command-palette:open` window event (dispatched by the header button) and navigates via `react-router`.
+  Cross-component "open this overlay" is a window `CustomEvent`, not a store — consistent with the
+  no-`localStorage`, no-global-state rule above.
 
 ### Testing doctrine
 
@@ -146,6 +172,36 @@ rejects a `-SNAPSHOT`, a non-`x.y.z` version, or a version whose tag already exi
 
 `pom.xml` has **no `<finalName>`** — Maven's default gives `mq-mebaysanization-<version>.jar`, and
 `verify-portability.sh` resolves it by glob.
+
+## Windows packaging for the VDI
+
+The deliverable for the VDI is a portable **`MQ-mebaysanization-<version>-win.zip`**: a launch4j `.exe` +
+a bundled Windows JRE (`jre/`) + `app/` (the fat JAR extracted to a thin launcher jar + `lib/`) +
+`Baslat-yedek.bat` + `OKU.txt`. It writes its H2 store to a `data\` folder **next to the `.exe`**, which
+is always writable — deliberately not `C:\ProgramData`, whose permission wall made an earlier jpackage
+build's `.exe` exit on launch with nothing on screen.
+
+**New versions are built the same way, and NOT with jpackage on macOS.** `jpackage` only targets the OS
+it runs on, so a Windows package cannot be produced here. Instead reuse a known-good prior `-win.zip` as a
+template — its `.exe` and `jre/` are version-independent; only `app/` changes:
+
+```bash
+mvn clean package            # builds the fat JAR (tests + frontend + JAR)
+./scripts/repackage-win.sh   # -> ~/Desktop/MQ-mebaysanization-<version>-win.zip
+```
+
+`scripts/repackage-win.sh` unpacks the template (`~/Desktop/MQ-mebaysanization-1.1.5-win.zip` by
+default), runs `java -Djarmode=tools -jar <fat> extract` to get the thin jar + `lib/`, swaps `app/`,
+repoints `Baslat-yedek.bat`, and **binary-patches the launch4j `.exe`'s embedded jar path** to the new
+name. That patch is safe only when the new jar filename is the **same length** as the template's
+(`1.1.5` → `1.1.8`, `1.2.0`: fine; a two-digit segment like `1.1.10` is not) — on a length mismatch the
+script leaves the `.exe` alone, and `Baslat-yedek.bat` remains the working launcher (regenerate the
+`.exe` with launch4j for a clean fix). `scripts/package-windows.ps1` (jpackage) stays as the alternative
+**run on an actual Windows box**, not here.
+
+The `-win.zip` bundles the IBM MQ client inside `lib/`: internal VDI use only, never redistribute, and it
+lives on the Desktop **outside the repo** — never commit it (same reason the fat JAR is never attached to
+a release; see Licensing).
 
 ## Licensing
 
