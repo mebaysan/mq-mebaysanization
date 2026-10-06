@@ -159,6 +159,25 @@ export interface SendMessageResult {
 }
 
 /**
+ * A message-send request remembered for a destination, so it can be sent again without retyping.
+ *
+ * `named` is false for an automatic history entry (written on every send, capped per destination) and
+ * true for one the user saved deliberately under a `label` (kept until forgotten). Shares the shape the
+ * send panel composes — `key`, `messageType` and `targetClient` are null on providers without them.
+ */
+export interface SavedRequest {
+  id: number
+  label: string | null
+  named: boolean
+  payload: string
+  properties: Record<string, string>
+  key: string | null
+  messageType: MessageType | null
+  targetClient: TargetClient | null
+  createdAt: string
+}
+
+/**
  * A request to create one topic. Kafka only — the JMS providers refuse it with a 501, so the UI only
  * ever offers it for a Kafka connection.
  */

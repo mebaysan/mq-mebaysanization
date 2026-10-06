@@ -2,10 +2,16 @@ import { useState } from 'react'
 
 import { ApiError } from '../../api/client'
 import { useSendMessage } from '../../api/queue'
-import type { MessageType, TargetClient } from '../../api/types'
+import {
+  useForgetRequest,
+  useSaveRequest,
+  useSavedRequests,
+  type RequestPayload,
+} from '../../api/savedRequests'
+import type { MessageType, SavedRequest, TargetClient } from '../../api/types'
 import { KeyValueEditor, type KeyValueRow } from '../../components/KeyValueEditor'
-import { buttonClass, cardClass, inputClass } from '../../components/Primitives'
-import { ChevronRightIcon, PlusIcon } from '../../components/icons'
+import { buttonClass, cardClass, inputClass, secondaryButtonClass } from '../../components/Primitives'
+import { ChevronRightIcon, PlusIcon, StarIcon, TrashIcon } from '../../components/icons'
 import { useToast } from '../../components/ToastProvider'
 import type { ProviderCaveat } from './ProviderCaveats'
 
@@ -50,6 +56,92 @@ function ToggleGroup<T extends string>({
   )
 }
 
+/** First line of a body, clipped — enough to recognise which request a row is without unfolding it. */
+function preview(body: string): string {
+  const firstLine = body.replace(/\s+/g, ' ').trim()
+  return firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || '(empty body)'
+}
+
+/** A saved request's own time, for the recent rows. Locale short time; the date is rarely the point. */
+function formatTime(at: string): string {
+  const parsed = new Date(at)
+  return Number.isNaN(parsed.getTime())
+    ? ''
+    : parsed.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * The remembered requests for this destination: the ones saved under a name, and the recent history of
+ * what was sent. Clicking one loads it back into the form; the bin forgets it.
+ */
+function RememberedRequests({
+  entries,
+  onLoad,
+  onForget,
+  forgetting,
+}: {
+  entries: SavedRequest[]
+  onLoad: (request: SavedRequest) => void
+  onForget: (id: number) => void
+  forgetting: boolean
+}) {
+  const named = entries.filter((entry) => entry.named)
+  const recent = entries.filter((entry) => !entry.named)
+
+  const row = (entry: SavedRequest) => (
+    <li key={entry.id} className="group flex items-center gap-2 rounded-md px-2 py-1 hover:bg-hover">
+      <button
+        type="button"
+        onClick={() => onLoad(entry)}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        title="Load this request into the form"
+      >
+        {entry.named ? (
+          <StarIcon size={12} fill="currentColor" className="shrink-0 text-amber-500" />
+        ) : (
+          <span className="shrink-0 text-[10px] tabular-nums text-fg-subtle">
+            {formatTime(entry.createdAt)}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-muted">
+          {entry.named ? entry.label : preview(entry.payload)}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onForget(entry.id)}
+        disabled={forgetting}
+        className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-opacity hover:text-rose-600 group-hover:opacity-100 disabled:opacity-50"
+        aria-label="Forget this request"
+        title="Forget this request"
+      >
+        <TrashIcon size={13} />
+      </button>
+    </li>
+  )
+
+  return (
+    <div className="mb-3 rounded-lg border border-line bg-surface-2/40 p-2">
+      {named.length > 0 && (
+        <>
+          <p className="px-1 pb-1 text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+            Saved
+          </p>
+          <ul className="space-y-0.5">{named.map(row)}</ul>
+        </>
+      )}
+      {recent.length > 0 && (
+        <>
+          <p className={`px-1 pb-1 text-[11px] font-medium uppercase tracking-wide text-fg-subtle ${named.length > 0 ? 'pt-2' : ''}`}>
+            Recent
+          </p>
+          <ul className="space-y-0.5">{recent.map(row)}</ul>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function SendPanel({
   connectionId,
   queueName,
@@ -67,9 +159,16 @@ export function SendPanel({
   const [messageType, setMessageType] = useState<MessageType>('TEXT')
   const [targetClient, setTargetClient] = useState<TargetClient>('JMS')
   const [rows, setRows] = useState<KeyValueRow[]>([{ key: '', value: '' }])
+  const [saveName, setSaveName] = useState('')
   // Collapsed by default: the message list is what a user comes to see, and the composer is a
   // deliberate action. It opens on demand and stays open across sends within the same destination.
   const [open, setOpen] = useState(false)
+
+  // Only read the remembered requests once the composer is open — a collapsed panel needs none of them,
+  // and the list would otherwise fetch for every destination just by being on the page.
+  const requests = useSavedRequests(connectionId, queueName, open)
+  const saveRequest = useSaveRequest(connectionId, queueName)
+  const forgetRequest = useForgetRequest(connectionId, queueName)
 
   // The server refuses this combination outright rather than dropping the properties, so warn while
   // there is still something to fix. Not by hiding the rows: that would either discard what was typed
@@ -77,35 +176,62 @@ export function SendPanel({
   const propertiesCannotTravel =
     caveat.hasTargetClient && targetClient === 'MQ' && rows.some((row) => row.key.trim() !== '')
 
+  // The one place the form is read into a request, so send and save cannot drift apart. Null, not '',
+  // for a provider without keys/types: the server rejects a non-null value outright rather than dropping
+  // it, which is what makes "the key was honoured" always true when one is sent.
+  const compose = (): RequestPayload => ({
+    payload,
+    properties: Object.fromEntries(
+      rows.filter((row) => row.key.trim() !== '').map((row) => [row.key.trim(), row.value]),
+    ),
+    key: caveat.hasMessageKey ? key.trim() || null : null,
+    messageType: caveat.hasMessageType ? messageType : null,
+    targetClient: caveat.hasTargetClient ? targetClient : null,
+  })
+
+  /** Loads a remembered request back into the form, keeping fields the provider does not have. */
+  const applyRequest = (request: SavedRequest) => {
+    setPayload(request.payload)
+    setKey(caveat.hasMessageKey ? (request.key ?? '') : '')
+    if (caveat.hasMessageType && request.messageType) setMessageType(request.messageType)
+    if (caveat.hasTargetClient && request.targetClient) setTargetClient(request.targetClient)
+    const entries = Object.entries(request.properties)
+    setRows(entries.length > 0 ? entries.map(([k, v]) => ({ key: k, value: v })) : [{ key: '', value: '' }])
+    setOpen(true)
+  }
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault()
+    const composed = compose()
 
-    const properties = Object.fromEntries(
-      rows.filter((row) => row.key.trim() !== '').map((row) => [row.key.trim(), row.value]),
-    )
-
-    send.mutate(
-      // Null, not '', for a provider without keys: the server rejects a non-null key outright rather
-      // than dropping it, which is what makes "the key was honoured" always true when one is sent.
-      // Same reasoning for the message type: null, not 'TEXT', where the provider has no such concept.
-      {
-        payload,
-        properties,
-        key: caveat.hasMessageKey ? key.trim() || null : null,
-        messageType: caveat.hasMessageType ? messageType : null,
-        targetClient: caveat.hasTargetClient ? targetClient : null,
+    send.mutate(composed, {
+      onSuccess: (result) => {
+        toast.success(`Sent. Message id ${result.messageId}`)
+        // Record what was actually sent as a history entry — captured before the reset below, and fired
+        // and forgotten: failing to remember a send must never look like the send itself failed.
+        saveRequest.mutate({ ...composed })
+        setPayload('')
+        setKey('')
+        setMessageType('TEXT')
+        // The target client deliberately survives the reset. A message type describes this message;
+        // the target client describes the reader of this queue, which does not change between sends.
+        // Clearing it would put the MQRFH2 header back on the very next send, silently reproducing
+        // the failure the user had just worked out how to avoid.
+        setRows([{ key: '', value: '' }])
       },
+      onError: (err) => toast.error(err instanceof ApiError ? err.message : String(err)),
+    })
+  }
+
+  const saveNamed = () => {
+    const label = saveName.trim()
+    if (label === '') return
+    saveRequest.mutate(
+      { ...compose(), label },
       {
-        onSuccess: (result) => {
-          toast.success(`Sent. Message id ${result.messageId}`)
-          setPayload('')
-          setKey('')
-          setMessageType('TEXT')
-          // The target client deliberately survives the reset. A message type describes this message;
-          // the target client describes the reader of this queue, which does not change between sends.
-          // Clearing it would put the MQRFH2 header back on the very next send, silently reproducing
-          // the failure the user had just worked out how to avoid.
-          setRows([{ key: '', value: '' }])
+        onSuccess: () => {
+          toast.success(`Saved "${label}"`)
+          setSaveName('')
         },
         onError: (err) => toast.error(err instanceof ApiError ? err.message : String(err)),
       },
@@ -134,6 +260,22 @@ export function SendPanel({
 
       {open && (
         <div className="animate-fade-in border-t border-line p-4">
+          {requests.data && requests.data.length > 0 ? (
+            <RememberedRequests
+              entries={requests.data}
+              onLoad={applyRequest}
+              onForget={(id) => forgetRequest.mutate(id)}
+              forgetting={forgetRequest.isPending}
+            />
+          ) : (
+            // Shown so the feature is discoverable before anything has been sent: this is where sent and
+            // saved requests will appear, ready to reload.
+            <p className="mb-3 rounded-lg border border-dashed border-line bg-surface-2/40 px-3 py-2 text-xs text-fg-subtle">
+              Messages you send here — and any you keep with “Save request” — collect below, ready to
+              load again with one click.
+            </p>
+          )}
+
           <textarea
             className={`${inputClass} min-h-28 font-mono`}
             value={payload}
@@ -220,7 +362,31 @@ export function SendPanel({
         )}
       </div>
 
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+            {/* Save the current form under a name. Enter here saves rather than submitting the whole
+                form, which would send an unintended message. */}
+            <input
+              className={`${inputClass} mt-0 w-40 py-1.5 text-xs`}
+              value={saveName}
+              onChange={(event) => setSaveName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  saveNamed()
+                }
+              }}
+              placeholder="Save as… (name)"
+              aria-label="Name to save this request under"
+              maxLength={120}
+            />
+            <button
+              type="button"
+              onClick={saveNamed}
+              disabled={saveName.trim() === '' || saveRequest.isPending}
+              className={secondaryButtonClass}
+            >
+              Save request
+            </button>
             <button type="submit" className={buttonClass} disabled={send.isPending}>
               {send.isPending ? 'Sending…' : 'Send message'}
             </button>

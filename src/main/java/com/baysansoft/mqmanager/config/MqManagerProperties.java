@@ -2,8 +2,12 @@ package com.baysansoft.mqmanager.config;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import com.baysansoft.mqmanager.domain.Provider;
 
 /** Everything tunable, bound from {@code application.yml} with environment-variable overrides. */
 @ConfigurationProperties("mqmanager")
@@ -38,6 +42,8 @@ public class MqManagerProperties {
     private Depth depth = new Depth();
     private Delete delete = new Delete();
     private Destinations destinations = new Destinations();
+    private Requests requests = new Requests();
+    private List<SeedConnection> seedConnections = new ArrayList<>();
     private Kafka kafka = new Kafka();
     private Logs logs = new Logs();
 
@@ -339,6 +345,22 @@ public class MqManagerProperties {
         }
     }
 
+    public static class Requests {
+        /**
+         * How many automatic history entries are kept per destination before the oldest are dropped.
+         * Named requests carry no such cap — they are kept until forgotten, like a pinned destination.
+         */
+        private int historyPerDestination = 10;
+
+        public int getHistoryPerDestination() {
+            return historyPerDestination;
+        }
+
+        public void setHistoryPerDestination(int historyPerDestination) {
+            this.historyPerDestination = historyPerDestination;
+        }
+    }
+
     public static class Delete {
         private Duration receiveTimeout = Duration.ofSeconds(5);
         /** Bounds the browse that distinguishes "not on the queue" from "cannot be reached". */
@@ -447,5 +469,116 @@ public class MqManagerProperties {
 
     public void setDestinations(Destinations destinations) {
         this.destinations = destinations;
+    }
+
+    public Requests getRequests() {
+        return requests;
+    }
+
+    public void setRequests(Requests requests) {
+        this.requests = requests;
+    }
+
+    public List<SeedConnection> getSeedConnections() {
+        return seedConnections;
+    }
+
+    public void setSeedConnections(List<SeedConnection> seedConnections) {
+        this.seedConnections = seedConnections;
+    }
+
+    /**
+     * A connection to create automatically on first start, if one with the same name does not already
+     * exist. Bound from {@code mqmanager.seed-connections}, which is deliberately empty in the committed
+     * {@code application.yml}: real broker addresses are site-specific and belong in a local, untracked
+     * file, never in a public repository. See {@code seed-connections.yml} and its {@code .gitignore}
+     * entry, and {@code config/ConnectionSeeder}.
+     *
+     * <p>A JavaBean rather than a record because the enclosing properties bind by setter, and a list of
+     * records would mix binding styles. Only the fields a real seed needs carry values; the rest mirror
+     * the create form so a JMS broker could be seeded too.
+     */
+    public static class SeedConnection {
+        private String name;
+        private Provider provider;
+        private String host;
+        private Integer port;
+        private String username;
+        private String brokerUrlOverride;
+        private String bootstrapServers;
+        private String queueManagerName;
+        private String channel;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public Provider getProvider() {
+            return provider;
+        }
+
+        public void setProvider(Provider provider) {
+            this.provider = provider;
+        }
+
+        public String getHost() {
+            return host;
+        }
+
+        public void setHost(String host) {
+            this.host = host;
+        }
+
+        public Integer getPort() {
+            return port;
+        }
+
+        public void setPort(Integer port) {
+            this.port = port;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getBrokerUrlOverride() {
+            return brokerUrlOverride;
+        }
+
+        public void setBrokerUrlOverride(String brokerUrlOverride) {
+            this.brokerUrlOverride = brokerUrlOverride;
+        }
+
+        public String getBootstrapServers() {
+            return bootstrapServers;
+        }
+
+        public void setBootstrapServers(String bootstrapServers) {
+            this.bootstrapServers = bootstrapServers;
+        }
+
+        public String getQueueManagerName() {
+            return queueManagerName;
+        }
+
+        public void setQueueManagerName(String queueManagerName) {
+            this.queueManagerName = queueManagerName;
+        }
+
+        public String getChannel() {
+            return channel;
+        }
+
+        public void setChannel(String channel) {
+            this.channel = channel;
+        }
     }
 }

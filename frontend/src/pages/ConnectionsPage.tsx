@@ -5,6 +5,7 @@ import { useConnections, useDeleteConnection, useTestConnection } from '../api/c
 import { ApiError } from '../api/client'
 import type { ConnectionProfile } from '../api/types'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { CopyButton } from '../components/CopyButton'
 import { ChevronRightIcon, PlusIcon } from '../components/icons'
 import {
   cardClass,
@@ -145,8 +146,23 @@ export default function ConnectionsPage() {
                   <td className="px-4 py-3">
                     <ProviderBadge provider={profile.provider} label={profile.providerLabel} />
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-fg-muted">
-                    {describeTarget(profile)}
+                  <td className="px-4 py-3">
+                    {/* The copy button must not navigate the row, so the cell swallows the click. */}
+                    <div
+                      className="flex items-center gap-1.5"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <span className="min-w-0 break-all font-mono text-xs text-fg-muted">
+                        {describeTarget(profile)}
+                      </span>
+                      <CopyButton
+                        text={describeTarget(profile)}
+                        label=""
+                        copiedLabel=""
+                        title="Copy cluster address"
+                        className="shrink-0 rounded-md p-1 text-fg-subtle transition-colors hover:bg-hover hover:text-fg-muted"
+                      />
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     {/* The row is the primary click; these actions must not trigger it, so the cell

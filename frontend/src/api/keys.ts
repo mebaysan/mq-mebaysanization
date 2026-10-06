@@ -18,6 +18,13 @@ export const queryKeys = {
   destinations: (id: number, kind: string, prefix: string, limit: number) =>
     ['connections', id, 'destinations', kind, prefix, limit] as const,
   savedDestinations: (id: number) => ['connections', id, 'saved-destinations'] as const,
+  /**
+   * Remembered send requests for one destination. Under the connection prefix so deleting a connection
+   * clears them, but NOT under the queue/messages prefix: sending or purging must not refetch this list
+   * except through its own mutation, which invalidates exactly this key.
+   */
+  savedRequests: (id: number, queueName: string) =>
+    ['connections', id, 'saved-requests', queueName] as const,
   /** Prefix, so clearing the buffer invalidates every filter combination at once. */
   logsRoot: () => ['logs'] as const,
   logs: (level: string, query: string, from: string, to: string, sort: string, limit: number) =>

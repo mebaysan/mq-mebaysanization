@@ -9,6 +9,8 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Star,
+  Trash2,
   X,
   type LucideIcon,
   type LucideProps,
@@ -39,4 +41,7 @@ export const InfoIcon = icon(Info)
 export const PlusIcon = icon(Plus)
 export const RefreshIcon = icon(RefreshCw)
 export const SearchIcon = icon(Search)
+// Pass fill="currentColor" to render a favorited (filled) star; the outline is the default.
+export const StarIcon = icon(Star)
+export const TrashIcon = icon(Trash2)
 export const XIcon = icon(X)
